@@ -1,0 +1,25 @@
+# Tema base de Streamlit.
+#
+# Lo que se puede hacer aqui es limitado, asi que esto solo fija los colores
+# de fondo y de acento. El resto del sistema de diseno vive en
+# kalman/web/theme.py, que es CSS y si permite tipografia, espaciado y estados.
+#
+# El fondo es claro a proposito. El oscuro se lee como herramienta de
+# programador; el comprador de Kalman es una gestoria o una pyme, y ahi el
+# fondo claro se lee como software serio.
+
+[theme]
+base = "light"
+primaryColor = "#1D4ED8"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F8FA"
+textColor = "#0E1726"
+font = "sans serif"
+
+[server]
+# Los ficheros que sube un cliente pueden ser grandes. 50 MB cubre un volcado
+# de CRM de varios cientos de miles de filas.
+maxUploadSize = 50
+
+[browser]
+gatherUsageStats = false

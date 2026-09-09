@@ -43,12 +43,15 @@ from kalman.core.engine import CleaningEngine, CleanOptions  # noqa: E402
 from kalman.core.pseudonymize import Pseudonymizer  # noqa: E402
 from kalman.db import Repository  # noqa: E402
 from kalman.reporting.pdf import CostAssumption, build_report  # noqa: E402
+from kalman.web.theme import brand, hero, inject_styles, note, plan_card  # noqa: E402
 
 st.set_page_config(
     page_title="Kalman · Calidad de datos",
     page_icon="◐",
     layout="wide",
 )
+
+inject_styles()
 
 
 @st.cache_resource
@@ -80,13 +83,15 @@ def login_screen() -> None:
     """
     left, middle, right = st.columns([1, 2, 1])
     with middle:
-        st.title("Kalman")
-        st.caption("Señal, no ruido, en los datos de tu empresa.")
+        brand("Señal, no ruido, en los datos de tu empresa")
 
         with st.form("login"):
+            st.markdown("#### Acceso")
             email = st.text_input("Email")
             password = st.text_input("Contraseña", type="password")
-            submitted = st.form_submit_button("Entrar", width="stretch")
+            submitted = st.form_submit_button(
+                "Entrar", width="stretch", type="primary"
+            )
 
         if submitted:
             user = get_repository().authenticate(email, password)
@@ -134,23 +139,36 @@ def subscription_panel(user: dict) -> dict:
 
 
 def pricing_section(user: dict) -> None:
-    """Catálogo de planes con enlace a la pasarela."""
-    st.subheader("Planes")
+    """Catálogo de planes con enlace a la pasarela.
+
+    Sin encabezado propio: se usa tanto en la página de planes, que ya lleva su
+    titular, como dentro de un muro de pago, que ya lleva su aviso. Repetir la
+    palabra "Planes" en ambos sitios queda redundante.
+    """
     columns = st.columns(len(PLANS))
 
     for column, plan in zip(columns, PLANS.values()):
+        # Growth es el plan que se quiere vender: es el primero con acceso a
+        # la API, que es lo que convierte a un cliente en uno que no se va.
+        destacado = plan.key == "growth"
+
         with column:
-            st.markdown(f"### {plan.name}")
-            st.markdown(f"**{plan.price_label}**")
-            st.caption(plan.summary)
-            for feature in plan.features:
-                st.markdown(f"- {feature}")
+            plan_card(
+                plan.name, plan.price_label, plan.summary, plan.features,
+                featured=destacado,
+            )
+            st.write("")
 
             if plan.is_free:
                 st.button("Incluido", key=f"free_{plan.key}", disabled=True, width="stretch")
                 continue
 
-            if st.button(f"Elegir {plan.name}", key=f"buy_{plan.key}", width="stretch"):
+            if st.button(
+                f"Elegir {plan.name}",
+                key=f"buy_{plan.key}",
+                width="stretch",
+                type="primary" if destacado else "secondary",
+            ):
                 try:
                     session = get_gateway().create_checkout(
                         user["org_id"], user["org_name"], user["email"], plan.key,
@@ -359,7 +377,6 @@ def _pdf_section(user: dict, report, plan) -> None:
 # ------------------------------------------------------------------ historial
 
 def history_section(user: dict) -> None:
-    st.subheader("Historial")
     jobs = get_repository().recent_jobs(user["org_id"])
     if not jobs:
         st.info("Todavía no has analizado ningún fichero.")
@@ -379,18 +396,40 @@ def main() -> None:
         login_screen()
         return
 
-    st.sidebar.title("Kalman")
-    st.sidebar.caption(user["org_name"])
+    with st.sidebar:
+        brand(user["org_name"], size=30)
+
     context = subscription_panel(user)
+
+    st.sidebar.divider()
+    page = st.sidebar.radio(
+        "Secciones",
+        ["Analizar", "Historial", "Planes"],
+        label_visibility="collapsed",
+    )
 
     st.sidebar.divider()
     if st.sidebar.button("Cerrar sesión", width="stretch"):
         st.session_state.clear()
         st.rerun()
 
-    page = st.sidebar.radio("", ["Analizar", "Historial", "Planes"], label_visibility="collapsed")
+    titulos = {
+        "Analizar": (
+            "Calidad de datos",
+            "Sube un fichero de clientes y Kalman te dice qué está mal y por qué.",
+        ),
+        "Historial": (
+            "Historial",
+            "Cada ejecución con su recuento de incidencias. Sin datos de tus clientes.",
+        ),
+        "Planes": (
+            "Planes",
+            "El precio va por filas procesadas al mes. Puedes cambiar o cancelar cuando quieras.",
+        ),
+    }
+    titulo, entradilla = titulos[page]
+    hero(titulo, entradilla)
 
-    st.title("Calidad de datos")
     if page == "Analizar":
         cleaning_section(user, context)
     elif page == "Historial":

@@ -32,6 +32,7 @@ from kalman.core.validators.iban import format_iban, validate_iban
 from kalman.core.validators.identity import validate_tax_id
 from kalman.reporting.pdf import RULE_LABELS, build_report
 from kalman.sample import generate
+from kalman.web.theme import brand, hero, inject_styles, note, verdict
 
 #: Tope de filas de la demo. Sin él, la demo es un servicio gratuito ilimitado
 #: y deja de ser una demo.
@@ -43,20 +44,7 @@ st.set_page_config(
     layout="wide",
 )
 
-st.markdown(
-    """
-    <style>
-      .block-container { padding-top: 2.5rem; max-width: 1100px; }
-      #MainMenu, footer { visibility: hidden; }
-      .kal-hero h1 { font-size: 2.6rem; margin-bottom: .2rem; letter-spacing: -.02em; }
-      .kal-hero p  { font-size: 1.05rem; opacity: .72; margin-top: 0; }
-      .kal-ok   { color: #15803d; font-weight: 600; }
-      .kal-bad  { color: #b91c1c; font-weight: 600; }
-      .kal-note { font-size: .82rem; opacity: .62; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+inject_styles()
 
 VALIDATORS = {
     "NIF, NIE o CIF": ("tax_id", validate_tax_id),
@@ -77,21 +65,21 @@ EXAMPLES = {
 
 # ------------------------------------------------------------------ cabecera
 
-st.markdown(
-    """
-    <div class="kal-hero">
-      <h1>Kalman</h1>
-      <p>Comprueba los datos de tus clientes antes de que te cuesten dinero.
-         NIF, CIF, NIE e IBAN verificados con su dígito de control oficial.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
+brand("Calidad de datos para empresas españolas")
+
+hero(
+    title="Un dato mal escrito cuesta dinero. Kalman los encuentra.",
+    lead=(
+        "Comprueba NIF, CIF, NIE e IBAN con su dígito de control oficial, "
+        "normaliza teléfonos y códigos postales y detecta clientes duplicados. "
+        "Sin instalar nada y sin registro."
+    ),
+    eyebrow="Demo pública",
 )
 
-st.markdown(
-    '<p class="kal-note">Demo pública. Nada de lo que subas aquí se guarda: '
-    "el fichero se procesa en memoria y se descarta al cerrar la página.</p>",
-    unsafe_allow_html=True,
+note(
+    "Nada de lo que subas aquí se guarda. El fichero se procesa en memoria y "
+    "se descarta al cerrar la página."
 )
 
 st.divider()
@@ -119,16 +107,16 @@ if value.strip():
         shown = result.normalized or value
         if kind == "iban":
             shown = format_iban(str(shown))
-        st.markdown(
-            f'<span class="kal-ok">Válido</span> &nbsp; <code>{shown}</code>',
-            unsafe_allow_html=True,
+        verdict(
+            "ok", "Válido",
+            "Comprobado contra el dígito de control oficial. No es una estimación.",
+            value=str(shown),
         )
-        st.caption("Comprobado contra el dígito de control oficial, no estimado.")
     else:
-        st.markdown('<span class="kal-bad">No válido</span>', unsafe_allow_html=True)
-        st.write(result.message)
+        sugerencia = ""
         if result.normalized and str(result.normalized) != value.strip():
-            st.info(f"¿Querías decir **{result.normalized}**?")
+            sugerencia = f" ¿Querías decir {result.normalized}?"
+        verdict("bad", "No válido", result.message + sugerencia)
 
 st.divider()
 
@@ -267,10 +255,23 @@ if df is not None:
         )
 
 st.divider()
-st.markdown(
-    '<p class="kal-note">Kalman comprueba NIF, NIE, CIF e IBAN con su dígito de '
-    "control oficial, normaliza teléfonos y códigos postales, detecta valores "
-    "imposibles y encuentra clientes duplicados. El motor es de código abierto "
-    "y se puede auditar.</p>",
-    unsafe_allow_html=True,
-)
+
+col_a, col_b, col_c = st.columns(3)
+with col_a:
+    st.markdown("**Exacto, no probabilístico**")
+    note(
+        "Los identificadores fiscales y los IBAN llevan dígito de control. "
+        "O cuadra o no cuadra, y Kalman te dice cuál falla y por qué."
+    )
+with col_b:
+    st.markdown("**Sin configurar nada**")
+    note(
+        "Kalman reconoce tus columnas por su nombre y por su contenido. "
+        "Las que no entiende las deja intactas."
+    )
+with col_c:
+    st.markdown("**Auditable**")
+    note(
+        "El motor es de código abierto y cada hallazgo lleva su regla, su "
+        "motivo y su nivel de confianza."
+    )
