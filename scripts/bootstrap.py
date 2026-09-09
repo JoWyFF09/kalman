@@ -89,8 +89,13 @@ def main() -> int:
     print("Clave de API. Se muestra una sola vez, guárdala ahora:")
     print(f"  {raw_key}")
     print()
-    print("Siguiente paso: crea los precios en Stripe y configura el webhook.")
-    print("  python scripts/setup_stripe.py --check")
+    print("Siguientes pasos:")
+    print("  1. Revisa que todo responda:")
+    print("       python scripts/doctor.py")
+    print("  2. Arranca la aplicacion:")
+    print("       python -m streamlit run kalman/web/app.py --server.port 8502")
+    print("  3. Antes de cobrar a nadie, crea el webhook de Stripe.")
+    print("     Esta explicado en docs/PUESTA_EN_MARCHA.md")
     return 0
 
 
