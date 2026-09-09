@@ -1,0 +1,47 @@
+# Secretos. Que esto esté aquí es lo único que separa una clave de Stripe de
+# estar publicada en internet para siempre.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.toml
+.streamlit/secrets.toml
+
+# Datos de clientes. Nunca, bajo ninguna circunstancia, en el repositorio.
+# Un CSV con NIF y IBAN reales subido a GitHub es una brecha de datos
+# notificable a la Agencia Española de Protección de Datos en 72 horas.
+*.csv
+*.xlsx
+*.xls
+!tests/fixtures/*.csv
+datos/
+data/
+uploads/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.tox/
+
+# Herramientas
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editores y sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Artefactos del motor anterior, que ya no se usan
+*.weights.h5
+*.pkl
