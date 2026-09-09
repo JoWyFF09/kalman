@@ -7,23 +7,42 @@ pantalla.
 La versión anterior tenía mil líneas en un solo fichero con el motor de IA, el
 SQL, el PDF, el correo, Stripe y la interfaz mezclados. Eso no se puede probar,
 no se puede revisar y no se puede reutilizar desde la API.
+
+Sobre los imports de este fichero
+---------------------------------
+Aquí se usan imports absolutos, `from kalman.x import y`, y no relativos,
+`from ..x import y`, aunque el fichero viva dentro del paquete.
+
+El motivo es que Streamlit no importa este fichero como módulo: lo ejecuta
+como un script suelto. En esa situación Python no sabe a qué paquete pertenece
+y cualquier import relativo falla con "attempted relative import with no known
+parent package". Hay una prueba en tests/test_web_entrypoint.py que impide que
+alguien los vuelva a poner relativos sin darse cuenta.
 """
 
 from __future__ import annotations
 
 import io
+import sys
+from pathlib import Path
 
-import pandas as pd
-import streamlit as st
+# Streamlit pone en sys.path la carpeta del script, que es kalman/web, no la
+# raíz del proyecto. Sin esto, "import kalman" no encuentra nada.
+_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
-from ..billing.plans import PLANS, can_process, get_plan
-from ..billing.stripe_gateway import BillingError, StripeGateway
-from ..billing.webhooks import entitlement_is_active
-from ..config import get_settings
-from ..core.engine import CleaningEngine, CleanOptions
-from ..core.pseudonymize import Pseudonymizer
-from ..db import Repository
-from ..reporting.pdf import CostAssumption, build_report
+import pandas as pd  # noqa: E402
+import streamlit as st  # noqa: E402
+
+from kalman.billing.plans import PLANS, can_process, get_plan  # noqa: E402
+from kalman.billing.stripe_gateway import BillingError, StripeGateway  # noqa: E402
+from kalman.billing.webhooks import entitlement_is_active  # noqa: E402
+from kalman.config import get_settings  # noqa: E402
+from kalman.core.engine import CleaningEngine, CleanOptions  # noqa: E402
+from kalman.core.pseudonymize import Pseudonymizer  # noqa: E402
+from kalman.db import Repository  # noqa: E402
+from kalman.reporting.pdf import CostAssumption, build_report  # noqa: E402
 
 st.set_page_config(
     page_title="Kalman · Calidad de datos",
