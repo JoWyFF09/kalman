@@ -119,3 +119,30 @@ Tiempo:               594 ms
 
 Ese fichero de ejemplo, con errores que un gestor reconoce como los suyos, es
 tu mejor herramienta de venta. Enséñalo antes que ninguna otra cosa.
+
+## Probar los planes de pago sin pagar
+
+El derecho de uso solo lo concede el webhook de Stripe, asi que recien creada
+tu organizacion se queda en el plan gratuito y no puedes probar lo que vendes.
+
+Para desarrollo hay un script de consola:
+
+```bash
+python scripts/set_plan.py --listar
+```
+
+```bash
+python scripts/set_plan.py --org kalman --plan growth
+```
+
+Para devolverlo al plan gratuito:
+
+```bash
+python scripts/set_plan.py --org kalman --plan free --estado inactive
+```
+
+Esto no contradice la regla de seguridad. La regla es que el navegador nunca
+decide quien ha pagado, y ese camino sigue cerrado. Este script necesita la
+cadena de conexion a la base de datos, es decir, credenciales de
+administrador, y se niega a ejecutarse con KALMAN_ENV=production. Cada cambio
+queda registrado en la tabla audit_log.

@@ -92,11 +92,23 @@ def _ascii(texto: str) -> str:
 
 
 def generate(rows: int = 2000, seed: int = 42) -> pd.DataFrame:
-    """Devuelve un DataFrame de clientes con defectos realistas."""
+    """Devuelve un DataFrame de clientes con defectos realistas.
+
+    `rows` es el numero exacto de filas del resultado, duplicados incluidos.
+
+    Antes no lo era: el bucle daba `rows` vueltas y ademas anadia duplicados
+    por encima, asi que pedir 2.000 devolvia 2.127. Un parametro que no hace lo
+    que dice es un fallo, y ademas se comia la cuota del plan gratuito sin que
+    se entendiera por que.
+    """
+    if rows < 1:
+        raise ValueError("Hacen falta al menos una fila.")
+
     rng = random.Random(seed)
     registros: list[dict[str, object]] = []
+    indice = 0
 
-    for indice in range(rows):
+    while len(registros) < rows:
         empresa_base = f"{rng.choice(GIROS)} {rng.choice(APELLIDOS)}"
         empresa = f"{empresa_base} {rng.choice(FORMAS)}"
         contacto = f"{rng.choice(NOMBRES)} {rng.choice(APELLIDOS)} {rng.choice(APELLIDOS)}"
@@ -152,11 +164,15 @@ def generate(rows: int = 2000, seed: int = 42) -> pd.DataFrame:
 
         registros.append(registro)
 
-        if rng.random() < DUPLICATE_RATE:
+        # El duplicado solo se anade si queda hueco, para no pasarse del total
+        # pedido. Asi `rows` significa exactamente lo que dice.
+        if len(registros) < rows and rng.random() < DUPLICATE_RATE:
             copia = dict(registro)
             copia["Nº Cliente"] = rows + indice + 1
             copia["Razón Social"] = f"{empresa_base.upper()} SOCIEDAD LIMITADA"
             copia["Correo electrónico"] = str(registro["Correo electrónico"]).upper()
             registros.append(copia)
+
+        indice += 1
 
     return pd.DataFrame(registros)
