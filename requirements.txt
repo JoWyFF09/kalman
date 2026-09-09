@@ -1,30 +1,26 @@
-# Dependencias del despliegue web completo.
+# Dependencias del despliegue publico, es decir, de demo_app.py.
 #
-# Para instalar sólo el motor, que es lo que se ejecuta en un proceso por
-# lotes o en una prueba, basta con:  pip install pandas numpy
+# Por que este fichero es tan corto
+# ---------------------------------
+# Streamlit Community Cloud no permite elegir el nombre del fichero de
+# dependencias: busca siempre "requirements.txt" en la raiz del repositorio.
+# Como lo unico que se despliega en abierto es la demo, este fichero contiene
+# exactamente lo que la demo necesita y nada mas.
 #
-# Ya no aparece TensorFlow. La red neuronal que había antes no aportaba
-# capacidad de detección y sí unos 600 MB de descarga, varios minutos de
-# arranque en frío y un consumo de memoria que obliga a pagar servidor.
+# Cuanto menos lleve el despliegue publico, menos tarda en arrancar y menos
+# superficie hay que vigilar. La demo no habla con la base de datos ni con
+# Stripe, asi que no instala sus paquetes ni pide sus credenciales.
+#
+# Para desarrollar con el proyecto completo, incluidas API, base de datos y
+# pagos, no uses este fichero. Usa los extras declarados en pyproject.toml:
+#
+#     pip install -e ".[web,api,db,billing,dev]"
+#
+# Ya no aparece TensorFlow. La red neuronal anterior no aportaba capacidad de
+# deteccion y si unos 600 MB de descarga y minutos de arranque en frio.
 
-# Núcleo
 pandas>=2.1
 numpy>=1.26
-
-# Interfaz web
 streamlit>=1.40
 openpyxl>=3.1
 fpdf2>=2.8
-
-# API
-fastapi>=0.115
-uvicorn[standard]>=0.32
-pydantic>=2.9
-python-multipart>=0.0.12
-
-# Base de datos
-psycopg[binary]>=3.2
-psycopg-pool>=3.2
-
-# Pagos
-stripe>=11.0

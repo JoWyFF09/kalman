@@ -167,3 +167,26 @@ que es el único camino de venta que no requiere un equipo comercial.
 - [PRIVACY.md](PRIVACY.md): qué se guarda, qué no, y por qué esto es seudonimización y no anonimización.
 
 Si encuentras un fallo de seguridad, no abras una incidencia pública.
+
+---
+
+## Desplegar la demo publica
+
+La demo es `demo_app.py`. No necesita base de datos, ni Stripe, ni ninguna
+credencial, asi que se puede publicar en abierto tal cual.
+
+En Streamlit Community Cloud:
+
+1. Repositorio `JoWyFF09/kalman`, rama `main`.
+2. Main file path: `demo_app.py`.
+3. En Advanced settings, Python version: **3.12**.
+4. No hay nada que rellenar en Secrets.
+
+Streamlit Cloud no permite elegir el nombre del fichero de dependencias:
+siempre usa `requirements.txt` de la raiz. Por eso ese fichero contiene solo
+las cinco dependencias de la demo. El proyecto completo se instala con los
+extras de `pyproject.toml`, no con ese fichero.
+
+La aplicacion con login y cobro es `kalman/web/app.py` y **no** debe
+desplegarse en Streamlit Community Cloud: necesita secretos de produccion y un
+sitio donde el webhook de Stripe pueda llegar.
