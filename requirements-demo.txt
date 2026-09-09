@@ -1,0 +1,14 @@
+# Dependencias de la demo pública, que es lo que se despliega en abierto.
+#
+# Es deliberadamente corta. La demo no habla con la base de datos ni con
+# Stripe, así que no necesita sus paquetes ni sus credenciales. Cuanto menos
+# lleve el despliegue público, menos superficie hay que vigilar.
+#
+# En Streamlit Community Cloud, indica este fichero como el de dependencias y
+# demo_app.py como el fichero principal.
+
+pandas>=2.1
+numpy>=1.26
+streamlit>=1.40
+openpyxl>=3.1
+fpdf2>=2.8
