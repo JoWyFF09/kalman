@@ -43,6 +43,7 @@ from kalman.core.engine import CleaningEngine, CleanOptions  # noqa: E402
 from kalman.core.pseudonymize import Pseudonymizer  # noqa: E402
 from kalman.db import Repository  # noqa: E402
 from kalman.reporting.pdf import CostAssumption, build_report  # noqa: E402
+from kalman.reporting.worklist import build_worklist, summary_line, to_excel  # noqa: E402
 from kalman.web.theme import brand, hero, inject_styles, note, plan_card  # noqa: E402
 
 st.set_page_config(
@@ -250,10 +251,12 @@ def cleaning_section(user: dict, context: dict) -> None:
         )
 
     st.session_state.last_result = result
-    _render_result(user, result, plan)
+    # El fichero original se conserva para poder construir la lista de trabajo,
+    # que necesita el valor tal y como venía y el nombre del cliente.
+    _render_result(user, result, plan, df)
 
 
-def _render_result(user: dict, result, plan) -> None:
+def _render_result(user: dict, result, plan, source: pd.DataFrame) -> None:
     report = result.report
 
     col1, col2, col3, col4 = st.columns(4)
@@ -269,9 +272,14 @@ def _render_result(user: dict, result, plan) -> None:
             "Columnas conservadas sin analizar: " + ", ".join(report.unmapped_columns)
         )
 
-    tabs = st.tabs(["Incidencias", "Datos válidos", "Cuarentena", "Duplicados"])
+    tabs = st.tabs(
+        ["Lista de trabajo", "Resumen", "Datos válidos", "Cuarentena", "Duplicados"]
+    )
 
     with tabs[0]:
+        _worklist_tab(source, report, result.duplicates)
+
+    with tabs[1]:
         counts = report.counts_by_rule()
         if not counts:
             st.success("No se ha encontrado ninguna incidencia.")
@@ -288,7 +296,7 @@ def _render_result(user: dict, result, plan) -> None:
                     width="stretch", hide_index=True,
                 )
 
-    with tabs[1]:
+    with tabs[2]:
         st.dataframe(result.valid, width="stretch")
         st.download_button(
             "Descargar CSV depurado",
@@ -297,7 +305,7 @@ def _render_result(user: dict, result, plan) -> None:
             mime="text/csv",
         )
 
-    with tabs[2]:
+    with tabs[3]:
         if result.quarantine.empty:
             st.info("No hay filas en cuarentena.")
         else:
@@ -309,7 +317,7 @@ def _render_result(user: dict, result, plan) -> None:
                 mime="text/csv",
             )
 
-    with tabs[3]:
+    with tabs[4]:
         if not result.duplicates:
             st.info("No se han encontrado duplicados.")
         else:
@@ -323,6 +331,53 @@ def _render_result(user: dict, result, plan) -> None:
             )
 
     _pdf_section(user, report, plan)
+
+
+def _worklist_tab(source: pd.DataFrame, report, duplicates) -> None:
+    """La lista de tareas. Es lo que el cliente abre el lunes por la mañana.
+
+    Va la primera de todas las pestañas a propósito. El recuento por regla
+    dice cuántos datos están mal; esta lista dice a quién hay que llamar, y es
+    la diferencia entre un diagnóstico y una herramienta.
+    """
+    worklist = build_worklist(source, report, duplicates)
+
+    if worklist.empty:
+        st.success("No hay nada que arreglar en este fichero.")
+        return
+
+    st.markdown(f"**{summary_line(worklist)}**")
+    note(
+        "Ordenada por urgencia. Arriba lo que está mal de forma demostrable, "
+        "debajo lo que conviene revisar. Cada línea dice a quién llamar y qué "
+        "preguntarle."
+    )
+
+    st.dataframe(worklist.head(1000), width="stretch", hide_index=True)
+    if len(worklist) > 1000:
+        st.caption(
+            f"Se muestran 1.000 de {len(worklist):,} líneas. "
+            "La descarga las incluye todas.".replace(",", ".")
+        )
+
+    col_excel, col_csv = st.columns(2)
+    with col_excel:
+        st.download_button(
+            "Descargar en Excel",
+            to_excel(worklist),
+            file_name="kalman_lista_de_trabajo.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            width="stretch",
+        )
+    with col_csv:
+        st.download_button(
+            "Descargar en CSV",
+            worklist.to_csv(index=False).encode("utf-8-sig"),
+            file_name="kalman_lista_de_trabajo.csv",
+            mime="text/csv",
+            width="stretch",
+        )
 
 
 def _pdf_section(user: dict, report, plan) -> None:

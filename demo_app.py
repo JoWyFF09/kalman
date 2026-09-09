@@ -31,6 +31,7 @@ from kalman.core.validators.contact import (
 from kalman.core.validators.iban import format_iban, validate_iban
 from kalman.core.validators.identity import validate_tax_id
 from kalman.reporting.pdf import RULE_LABELS, build_report
+from kalman.reporting.worklist import build_worklist, summary_line, to_excel
 from kalman.sample import generate
 from kalman.web.theme import brand, hero, inject_styles, note, verdict
 
@@ -187,9 +188,37 @@ if df is not None:
         "demostrable. No se ha borrado, se ha separado."
     )
 
-    tabs = st.tabs(["Qué se ha encontrado", "Filas correctas", "Cuarentena", "Duplicados"])
+    tabs = st.tabs(
+        ["Lista de trabajo", "Resumen", "Filas correctas", "Cuarentena", "Duplicados"]
+    )
 
     with tabs[0]:
+        # Va la primera porque es lo que hace que alguien pague. El recuento
+        # dice cuántos datos están mal; esta lista dice a quién hay que llamar.
+        worklist = build_worklist(df, report, result.duplicates)
+        if worklist.empty:
+            st.success("No hay nada que arreglar en este fichero.")
+        else:
+            st.markdown(f"**{summary_line(worklist)}**")
+            note(
+                "Ordenada por urgencia. Cada línea dice a qué cliente llamar, "
+                "qué campo está mal y qué preguntarle."
+            )
+            st.dataframe(worklist.head(500), width="stretch", hide_index=True)
+            if len(worklist) > 500:
+                st.caption(
+                    f"Se muestran 500 de {len(worklist):,} líneas. "
+                    "La descarga las incluye todas.".replace(",", ".")
+                )
+            st.download_button(
+                "Descargar la lista en Excel",
+                to_excel(worklist),
+                file_name="kalman_lista_de_trabajo.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+            )
+
+    with tabs[1]:
         counts = report.counts_by_rule()
         if not counts:
             st.success("No se ha encontrado ninguna incidencia.")
@@ -206,7 +235,7 @@ if df is not None:
                 "sólo que algo es raro."
             )
 
-    with tabs[1]:
+    with tabs[2]:
         st.dataframe(result.valid.head(500), width="stretch")
         st.download_button(
             "Descargar CSV depurado",
@@ -215,7 +244,7 @@ if df is not None:
             mime="text/csv",
         )
 
-    with tabs[2]:
+    with tabs[3]:
         if result.quarantine.empty:
             st.info("No hay filas en cuarentena.")
         else:
@@ -227,7 +256,7 @@ if df is not None:
                 mime="text/csv",
             )
 
-    with tabs[3]:
+    with tabs[4]:
         if not result.duplicates:
             st.info("No se han encontrado duplicados.")
         else:
