@@ -113,10 +113,52 @@ def revisar_base_de_datos() -> None:
             print(f"{AVISO} Se esperaban 7 tablas. Aplica el esquema con:")
             print("         python scripts/bootstrap.py --solo-esquema --org x --email x@x.com")
     except Exception as exc:
+        mensaje = str(exc).strip().splitlines()[0]
         print(f"{FALTA} No se ha podido conectar.")
-        print(f"         {type(exc).__name__}: {str(exc).strip().splitlines()[0][:160]}")
-        print("         Revisa la contrasena y que la copiaste entera desde Supabase.")
+        print(f"         {type(exc).__name__}: {mensaje[:160]}")
+        _explicar_fallo_de_conexion(mensaje, url)
         pendientes.append("arreglar la conexion a la base de datos")
+
+
+def _explicar_fallo_de_conexion(mensaje: str, url: str) -> None:
+    """Traduce el error de psycopg a una instruccion concreta.
+
+    Un mensaje generico como "revisa la contrasena" hace perder media hora
+    cuando el problema es la red. Cada causa tiene su arreglo y son distintos.
+    """
+    bajo = mensaje.lower()
+
+    if "resolve host" in bajo or "getaddrinfo" in bajo or "name or service not known" in bajo:
+        print()
+        print("         CAUSA: tu red no llega a ese servidor.")
+        print("         Supabase publica la conexion directa 'db.<ref>.supabase.co'")
+        print("         solo por IPv6. Si tu conexion no tiene IPv6, no se resuelve.")
+        print()
+        print("         ARREGLO: usa el pooler, que si tiene IPv4. En Supabase,")
+        print("         boton Connect, elige 'Session pooler' en vez de")
+        print("         'Direct connection'. La cadena cambia de forma:")
+        print("           usuario:  postgres.<ref>   en vez de   postgres")
+        print("           servidor: aws-N-<region>.pooler.supabase.com")
+        return
+
+    if "password authentication failed" in bajo or "autenticacion" in bajo:
+        print("         CAUSA: la contrasena no es correcta.")
+        print("         En Supabase: Settings, Database, Reset database password.")
+        return
+
+    if "tenant or user not found" in bajo or "enotfound" in bajo:
+        print("         CAUSA: el usuario o la region del pooler no cuadran.")
+        print("         El usuario del pooler es 'postgres.<ref>', con el punto.")
+        print("         Y la region puede ser aws-0 o aws-1: prueba las dos.")
+        return
+
+    if "timeout" in bajo or "timed out" in bajo:
+        print("         CAUSA: el servidor no responde a tiempo.")
+        print("         Puede que el proyecto de Supabase este pausado o")
+        print("         todavia arrancando. Espera un minuto y reintenta.")
+        return
+
+    print("         Revisa que copiaste la cadena entera desde Supabase.")
 
 
 def revisar_stripe() -> None:
