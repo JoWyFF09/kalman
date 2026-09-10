@@ -1,19 +1,18 @@
 # Tema base de Streamlit.
 #
-# Lo que se puede hacer aqui es limitado, asi que esto solo fija los colores
-# de fondo y de acento. El resto del sistema de diseno vive en
-# kalman/web/theme.py, que es CSS y si permite tipografia, espaciado y estados.
+# Lo que se puede hacer aqui es limitado, asi que esto solo fija fondo, texto
+# y color de acento para que los controles propios de Streamlit no queden a
+# medio camino. El resto del sistema de diseno vive en kalman/web/theme.py.
 #
-# El fondo es claro a proposito. El oscuro se lee como herramienta de
-# programador; el comprador de Kalman es una gestoria o una pyme, y ahi el
-# fondo claro se lee como software serio.
+# El acento es blanco a proposito. La accion principal es blanco sobre negro,
+# monocroma. Un color de marca en cada boton hace que todo grite a la vez.
 
 [theme]
-base = "light"
-primaryColor = "#1D4ED8"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F7F8FA"
-textColor = "#0E1726"
+base = "dark"
+primaryColor = "#FFFFFF"
+backgroundColor = "#0A0A0A"
+secondaryBackgroundColor = "#151515"
+textColor = "#FFFFFF"
 font = "sans serif"
 
 [server]

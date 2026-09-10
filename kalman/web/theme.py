@@ -4,43 +4,75 @@ Un solo fichero para las dos interfaces, la demo pública y la aplicación con
 sesión. Si el estilo viviera duplicado en cada una, en dos semanas serían dos
 productos distintos con el mismo nombre.
 
-Decisiones y por qué
---------------------
-**Fondo claro.** El oscuro se lee como herramienta de programador. El comprador
-de Kalman es una gestoría o una pyme, y ahí el fondo claro se lee como software
-serio. Es una decisión de producto, no de gusto.
+De dónde sale este diseño
+-------------------------
+Está inspirado en cómo resuelve OpenAI su web, después de medir la suya en
+vivo. Lo que se ha tomado son principios, no adornos, y ninguno es propiedad
+de nadie:
 
-**Un solo color de acento.** Los productos que usan cinco colores de marca
-parecen plantillas. Aquí el azul se reserva para lo accionable, y el verde, el
-ámbar y el rojo sólo aparecen para decir válido, sospechoso o inválido, que es
-justo el vocabulario del producto.
+1. **Casi monocromo.** Un color de marca en cada botón hace que todo grite a
+   la vez. Aquí la acción principal es blanco sobre negro. El color se reserva
+   para el veredicto de un dato, que es lo único que de verdad debe gritar.
+2. **Botones en píldora.** Radio completo. Es la señal más reconocible de
+   interfaz cuidada y no cuesta nada.
+3. **Peso medio, no negrita.** Los títulos van en 540 o 550, no en 700. La
+   negrita se lee como plantilla barata.
+4. **Interletraje negativo en los títulos**, y proporcional al tamaño. Es lo
+   que hace que un titular parezca dibujado y no escrito con la fuente por
+   defecto.
+5. **Escala tipográfica contenida.** Su web usa 14 y 16 píxeles en casi todo.
+   Un texto pequeño y seguro transmite más autoridad que uno grande.
+6. **Superficies en vez de cajas.** Una línea de un píxel y un fondo apenas
+   más claro, en lugar de bordes gruesos y sombras.
 
-**Cifras en tipografía tabular.** Una columna de números que baila al cambiar
-de dígito parece amateur y cuesta de leer. `font-variant-numeric: tabular-nums`
-lo arregla y casi nadie lo pone.
+Lo que NO se ha copiado: su tipografía, que tiene licencia cerrada, su
+logotipo, y la estructura literal de sus páginas. Kalman debe parecerse a un
+producto cuidado, no a otro producto.
 
-Todo son variables CSS. Cambiar la marca es cambiar `PALETTE`, no buscar
-colores repartidos por el código.
+Cambiar la marca entera es cambiar `DARK` y `LIGHT`, no buscar colores
+repartidos por el código.
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
-#: Paleta. Contrastes comprobados sobre fondo blanco para cumplir el nivel AA
-#: de accesibilidad en el texto principal.
-PALETTE: dict[str, str] = {
+#: Paleta oscura. Es la que se despliega. Los contrastes se comprueban en las
+#: pruebas: todo el texto cumple el nivel AA del W3C sobre su fondo.
+DARK: dict[str, str] = {
+    "bg": "#0A0A0A",
+    "surface": "#151515",
+    "surface_alt": "#1E1E1E",
+    "border": "#282828",
+    "border_strong": "#3A3A3A",
+    "ink": "#FFFFFF",
+    "ink_soft": "#E4E4E7",
+    "muted": "#9A9AA5",
+    "accent": "#FFFFFF",
+    "on_accent": "#0A0A0A",
+    "accent_soft": "#1E1E1E",
+    "ok": "#4ADE80",
+    "ok_soft": "#12251A",
+    "warn": "#FBBF24",
+    "warn_soft": "#2A2110",
+    "bad": "#FB7185",
+    "bad_soft": "#2B1418",
+}
+
+#: Paleta clara. No se despliega hoy, pero un cliente grande la pedirá algún
+#: día y tenerla escrita cuesta veinte líneas ahora y una semana después.
+LIGHT: dict[str, str] = {
     "bg": "#FFFFFF",
-    "surface": "#F7F8FA",
-    "surface_alt": "#EFF2F6",
-    "border": "#E3E7ED",
-    "border_strong": "#CBD3DD",
-    "ink": "#0E1726",
-    "ink_soft": "#3B4757",
-    "muted": "#66738A",
-    "accent": "#1D4ED8",
-    "accent_dark": "#1739A8",
-    "accent_soft": "#EEF3FF",
+    "surface": "#F7F7F8",
+    "surface_alt": "#EFEFF1",
+    "border": "#E4E4E7",
+    "border_strong": "#C9C9CF",
+    "ink": "#0D0D0D",
+    "ink_soft": "#3D3D46",
+    "muted": "#63636E",
+    "accent": "#0D0D0D",
+    "on_accent": "#FFFFFF",
+    "accent_soft": "#F0F0F2",
     "ok": "#047857",
     "ok_soft": "#ECFDF5",
     "warn": "#B45309",
@@ -49,9 +81,12 @@ PALETTE: dict[str, str] = {
     "bad_soft": "#FEF3F2",
 }
 
-#: Pila tipográfica. Inter si el navegador puede traerla, y si no, la fuente
-#: del sistema. Nunca se deja sin alternativa: una página que espera a una
-#: fuente remota parpadea en blanco con conexión lenta.
+#: Paleta activa. Se despliega la oscura.
+PALETTE = DARK
+
+#: Pila tipográfica. Inter es la alternativa abierta más cercana a lo que usan
+#: las webs cuidadas de hoy. Nunca se deja sin alternativa del sistema: una
+#: página que espera a una fuente remota parpadea en blanco con conexión lenta.
 FONT_STACK = (
     "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, "
     "'Helvetica Neue', Arial, sans-serif"
@@ -72,32 +107,36 @@ def _one_line(html: str) -> str:
     return " ".join(line.strip() for line in html.strip().splitlines())
 
 
-def logo(size: int = 34) -> str:
+def logo(size: int = 26) -> str:
     """Marca de Kalman como SVG en línea.
 
     Representa lo que hace el producto: una señal ruidosa que entra por la
-    izquierda y sale limpia por la derecha. Va en línea y no como fichero para
-    que no dependa de ninguna descarga y se vea aunque falle la red.
+    izquierda y sale limpia por la derecha.
+
+    Se dibuja con `currentColor` y sin recuadro de fondo, de modo que hereda el
+    color del texto y funciona igual sobre negro que sobre blanco. Un logotipo
+    con el fondo quemado obliga a mantener dos ficheros, y uno de los dos
+    siempre acaba desactualizado.
     """
     return _one_line(f"""
-    <svg width="{size}" height="{size}" viewBox="0 0 40 40" fill="none"
-         xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Kalman">
-      <rect width="40" height="40" rx="10" fill="{PALETTE['ink']}"/>
-      <path d="M7 24 L10 16 L13 27 L16 12 L19 22"
-            stroke="{PALETTE['muted']}" stroke-width="2"
-            stroke-linecap="round" stroke-linejoin="round" opacity="0.75"/>
-      <path d="M19 22 L23 20 L33 20"
-            stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round"/>
-      <circle cx="33" cy="20" r="2.6" fill="{PALETTE['accent']}"/>
+    <svg width="{size}" height="{size}" viewBox="0 0 32 32" fill="none"
+         xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Kalman"
+         style="display:block">
+      <path d="M2 20 L5 11 L8 24 L11 6 L14 17"
+            stroke="currentColor" stroke-width="1.9" stroke-linecap="round"
+            stroke-linejoin="round" opacity="0.45"/>
+      <path d="M14 17 L18 15 L28 15"
+            stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="28" cy="15" r="2.4" fill="currentColor"/>
     </svg>
     """)
 
 
-def _css() -> str:
-    p = PALETTE
+def _css(palette: dict[str, str]) -> str:
+    p = palette
     return f"""
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
       :root {{
         --kal-bg: {p['bg']};
@@ -109,26 +148,30 @@ def _css() -> str:
         --kal-ink-soft: {p['ink_soft']};
         --kal-muted: {p['muted']};
         --kal-accent: {p['accent']};
-        --kal-accent-dark: {p['accent_dark']};
+        --kal-on-accent: {p['on_accent']};
         --kal-accent-soft: {p['accent_soft']};
         --kal-ok: {p['ok']};
+        --kal-ok-soft: {p['ok_soft']};
         --kal-warn: {p['warn']};
+        --kal-warn-soft: {p['warn_soft']};
         --kal-bad: {p['bad']};
-        --kal-radius: 10px;
-        --kal-shadow: 0 1px 2px rgba(14,23,38,.06), 0 1px 3px rgba(14,23,38,.04);
-        --kal-shadow-lift: 0 4px 12px rgba(14,23,38,.10);
+        --kal-bad-soft: {p['bad_soft']};
+        --kal-pill: 9999px;
+        --kal-radius: 12px;
+        --kal-radius-lg: 16px;
       }}
 
       html, body, [data-testid="stAppViewContainer"] {{
         font-family: {FONT_STACK};
         color: var(--kal-ink);
+        background: var(--kal-bg);
+        -webkit-font-smoothing: antialiased;
       }}
 
       /* Los iconos de Streamlit son ligaduras de una fuente propia: el
          elemento contiene literalmente la palabra "upload" y la fuente la
          dibuja como un icono. Si se le aplica la tipografia del texto, la
-         ligadura no se resuelve y en el boton de subir fichero aparece
-         "uploadUpload" escrito. Por eso hay que devolverles su fuente. */
+         ligadura no se resuelve y aparece "uploadUpload" escrito. */
       [data-testid="stIconMaterial"],
       [class*="material-symbols"],
       [class*="material-icons"],
@@ -140,191 +183,245 @@ def _css() -> str:
         letter-spacing: normal !important;
       }}
 
-      [data-testid="stAppViewContainer"] {{ background: var(--kal-bg); }}
       [data-testid="stHeader"] {{ background: transparent; }}
       #MainMenu, footer {{ visibility: hidden; }}
 
       .block-container {{
-        padding-top: 2.2rem;
-        padding-bottom: 4rem;
-        max-width: 1120px;
+        padding-top: 2.4rem;
+        padding-bottom: 5rem;
+        max-width: 1080px;
       }}
 
       /* --------------------------------------------------- tipografia */
 
       h1, h2, h3, h4 {{
         color: var(--kal-ink);
-        font-weight: 650;
-        letter-spacing: -.021em;
-        line-height: 1.2;
+        font-weight: 550;
+        line-height: 1.18;
       }}
-      h1 {{ font-size: 2.1rem; }}
-      h2 {{ font-size: 1.35rem; margin-top: .4rem; }}
-      h3 {{ font-size: 1.08rem; }}
+      /* El interletraje negativo escala con el tamano: un titular grande
+         necesita mas correccion que un epigrafe pequeno. */
+      h1 {{ font-size: 2.35rem; letter-spacing: -.035em; }}
+      h2 {{ font-size: 1.3rem;  letter-spacing: -.021em; margin-top: .5rem; }}
+      h3 {{ font-size: 1.02rem; letter-spacing: -.014em; }}
+      h4 {{ font-size: .95rem;  letter-spacing: -.01em; }}
 
-      p, li, label, .stMarkdown {{ color: var(--kal-ink-soft); line-height: 1.6; }}
+      p, li, .stMarkdown {{
+        color: var(--kal-ink-soft);
+        font-size: .93rem;
+        line-height: 1.62;
+        font-weight: 400;
+      }}
 
       /* Las cifras nunca deben bailar al cambiar de digito. */
-      [data-testid="stMetricValue"], code, .kal-num, [data-testid="stDataFrame"] {{
-        font-variant-numeric: tabular-nums;
-      }}
+      [data-testid="stMetricValue"], code, .kal-num,
+      [data-testid="stDataFrame"] {{ font-variant-numeric: tabular-nums; }}
 
       code {{
         font-family: {MONO_STACK};
         background: var(--kal-surface-alt);
         color: var(--kal-ink);
-        padding: .12em .4em;
-        border-radius: 5px;
-        font-size: .88em;
+        padding: .14em .45em;
+        border-radius: 6px;
+        font-size: .86em;
+        border: 1px solid var(--kal-border);
       }}
 
       /* ------------------------------------------------------ cabecera */
 
       .kal-brand {{
-        display: flex; align-items: center; gap: .7rem; margin-bottom: 1.4rem;
-      }}
-      .kal-brand-name {{
-        font-size: 1.22rem; font-weight: 680; letter-spacing: -.02em;
+        display: flex; align-items: center; gap: .6rem; margin-bottom: 1.5rem;
         color: var(--kal-ink);
       }}
+      .kal-brand-name {{
+        font-size: 1.05rem; font-weight: 600; letter-spacing: -.02em;
+        line-height: 1.15;
+      }}
       .kal-brand-tag {{
-        font-size: .8rem; color: var(--kal-muted); margin-top: -2px;
+        font-size: .78rem; color: var(--kal-muted); font-weight: 400;
+        letter-spacing: -.005em;
       }}
 
-      .kal-hero {{ margin: .4rem 0 1.6rem; }}
-      .kal-hero h1 {{ font-size: 2.5rem; margin: 0 0 .5rem; }}
+      .kal-hero {{ margin: 1.4rem 0 2rem; }}
+      .kal-hero h1 {{ margin: 0 0 .75rem; max-width: 20ch; }}
       .kal-hero .lead {{
-        font-size: 1.06rem; color: var(--kal-ink-soft);
-        max-width: 62ch; line-height: 1.55; margin: 0;
+        font-size: 1.02rem; color: var(--kal-muted);
+        max-width: 60ch; line-height: 1.6; margin: 0; font-weight: 400;
       }}
 
       .kal-eyebrow {{
-        display: inline-block; font-size: .72rem; font-weight: 640;
-        letter-spacing: .09em; text-transform: uppercase;
-        color: var(--kal-accent); background: var(--kal-accent-soft);
-        padding: .3rem .6rem; border-radius: 999px; margin-bottom: .9rem;
+        display: inline-flex; align-items: center;
+        font-size: .74rem; font-weight: 500; letter-spacing: .01em;
+        color: var(--kal-ink-soft);
+        background: var(--kal-surface);
+        border: 1px solid var(--kal-border);
+        padding: .3rem .75rem; border-radius: var(--kal-pill);
+        margin-bottom: 1.1rem;
       }}
 
-      .kal-note {{ font-size: .84rem; color: var(--kal-muted); line-height: 1.55; }}
+      .kal-note {{
+        font-size: .84rem; color: var(--kal-muted); line-height: 1.6;
+        font-weight: 400;
+      }}
 
       /* -------------------------------------------------------- botones */
 
-      .stButton > button, .stDownloadButton > button, .stLinkButton > a {{
-        border-radius: var(--kal-radius);
+      .stButton > button, .stDownloadButton > button, .stLinkButton > a,
+      [data-testid^="stBaseButton"] {{
+        border-radius: var(--kal-pill) !important;
         border: 1px solid var(--kal-border-strong);
-        background: var(--kal-bg);
+        background: transparent;
         color: var(--kal-ink);
-        font-weight: 560;
-        padding: .52rem 1rem;
-        transition: all .14s ease;
-        box-shadow: var(--kal-shadow);
+        font-weight: 500;
+        font-size: .875rem;
+        letter-spacing: -.006em;
+        padding: .5rem 1.15rem;
+        box-shadow: none;
+        transition: background .13s ease, border-color .13s ease, opacity .13s ease;
       }}
-      .stButton > button:hover, .stDownloadButton > button:hover, .stLinkButton > a:hover {{
-        border-color: var(--kal-accent);
-        color: var(--kal-accent);
-        box-shadow: var(--kal-shadow-lift);
-        transform: translateY(-1px);
+      .stButton > button:hover, .stDownloadButton > button:hover,
+      .stLinkButton > a:hover {{
+        background: var(--kal-surface);
+        border-color: var(--kal-ink);
+        color: var(--kal-ink);
       }}
-      /* El prefijo cubre tambien "primaryFormSubmit", que es el valor que pone
-         Streamlit al boton de enviar de un formulario. Con la coincidencia
-         exacta, ese boton se quedaba sin los estados de hover y de foco. */
+
+      /* La accion principal es monocroma: blanco sobre negro. Un color de
+         marca en cada boton hace que todo grite a la vez. */
       .stButton > button[kind^="primary"],
+      .stDownloadButton > button[kind^="primary"],
       .stLinkButton > a[kind^="primary"],
       [data-testid^="stBaseButton-primary"] {{
-        background: var(--kal-accent);
-        border-color: var(--kal-accent);
-        color: #fff;
+        background: var(--kal-accent) !important;
+        border-color: var(--kal-accent) !important;
+        color: var(--kal-on-accent) !important;
       }}
       .stButton > button[kind^="primary"]:hover,
+      .stDownloadButton > button[kind^="primary"]:hover,
       .stLinkButton > a[kind^="primary"]:hover,
       [data-testid^="stBaseButton-primary"]:hover {{
-        background: var(--kal-accent-dark);
-        border-color: var(--kal-accent-dark);
-        color: #fff;
+        opacity: .88;
       }}
-      .stButton > button:focus-visible, .stDownloadButton > button:focus-visible {{
-        outline: 3px solid var(--kal-accent-soft);
-        outline-offset: 1px;
+      .stButton > button:focus-visible,
+      .stDownloadButton > button:focus-visible {{
+        outline: 2px solid var(--kal-ink);
+        outline-offset: 2px;
+      }}
+      .stButton > button:disabled {{ opacity: .38; }}
+
+      /* Streamlit mete el texto del boton dentro de un <p> o un <div> propio.
+         Sin esto, la regla generica de parrafo le pone color de texto normal y
+         la etiqueta queda gris clara sobre el boton blanco. */
+      .stButton > button p, .stButton > button div,
+      .stDownloadButton > button p, .stDownloadButton > button div,
+      .stLinkButton > a p, .stLinkButton > a div,
+      [data-testid^="stBaseButton"] p, [data-testid^="stBaseButton"] div {{
+        color: inherit !important;
+        font-size: inherit !important;
+        font-weight: inherit !important;
+        letter-spacing: inherit !important;
       }}
 
       /* --------------------------------------------------------- campos */
 
-      [data-baseweb="input"], [data-baseweb="select"] > div, .stTextArea textarea {{
+      [data-baseweb="input"], [data-baseweb="select"] > div,
+      .stTextArea textarea, [data-testid="stNumberInputContainer"] {{
         border-radius: var(--kal-radius) !important;
-        border-color: var(--kal-border-strong) !important;
+        border: 1px solid var(--kal-border) !important;
+        background: var(--kal-surface) !important;
+        color: var(--kal-ink) !important;
+      }}
+      [data-baseweb="input"]:focus-within,
+      [data-baseweb="select"] > div:focus-within {{
+        border-color: var(--kal-ink) !important;
         background: var(--kal-bg) !important;
       }}
-      [data-baseweb="input"]:focus-within, [data-baseweb="select"] > div:focus-within {{
-        border-color: var(--kal-accent) !important;
-        box-shadow: 0 0 0 3px var(--kal-accent-soft) !important;
-      }}
+      input, textarea {{ color: var(--kal-ink) !important; }}
+      input::placeholder {{ color: var(--kal-muted) !important; }}
+
       label, [data-testid="stWidgetLabel"] p {{
-        font-weight: 560 !important; color: var(--kal-ink) !important;
-        font-size: .88rem !important;
+        font-weight: 500 !important;
+        color: var(--kal-ink) !important;
+        font-size: .855rem !important;
+        letter-spacing: -.005em;
       }}
 
       /* -------------------------------------------------------- metricas */
 
       [data-testid="stMetric"] {{
-        background: var(--kal-bg);
+        background: var(--kal-surface);
         border: 1px solid var(--kal-border);
-        border-radius: var(--kal-radius);
-        padding: 1rem 1.1rem;
-        box-shadow: var(--kal-shadow);
+        border-radius: var(--kal-radius-lg);
+        padding: 1.05rem 1.15rem;
       }}
       [data-testid="stMetricLabel"] p {{
-        font-size: .74rem !important;
-        font-weight: 620 !important;
-        letter-spacing: .05em;
-        text-transform: uppercase;
+        font-size: .78rem !important;
+        font-weight: 400 !important;
+        letter-spacing: -.004em;
+        text-transform: none;
         color: var(--kal-muted) !important;
       }}
       [data-testid="stMetricValue"] {{
-        font-size: 1.85rem;
-        font-weight: 660;
-        letter-spacing: -.02em;
+        font-size: 1.75rem;
+        font-weight: 600;
+        letter-spacing: -.035em;
         color: var(--kal-ink);
       }}
 
       /* ---------------------------------------------------------- fichas */
 
       .kal-card {{
-        background: var(--kal-bg);
+        background: var(--kal-surface);
         border: 1px solid var(--kal-border);
-        border-radius: 14px;
-        padding: 1.4rem 1.5rem;
-        box-shadow: var(--kal-shadow);
+        border-radius: var(--kal-radius-lg);
+        padding: 1.5rem 1.5rem 1.6rem;
         height: 100%;
       }}
-      .kal-card h3 {{ margin: 0 0 .2rem; font-size: 1.02rem; }}
+      .kal-card h3 {{ margin: 0 0 .35rem; font-size: .98rem; font-weight: 600; }}
       .kal-card .price {{
-        font-size: 1.7rem; font-weight: 680; letter-spacing: -.025em;
-        color: var(--kal-ink); margin: .1rem 0 .5rem;
+        font-size: 1.75rem; font-weight: 600; letter-spacing: -.038em;
+        color: var(--kal-ink); margin: .15rem 0 .55rem; line-height: 1.1;
       }}
-      .kal-card ul {{ margin: .6rem 0 0; padding-left: 1.1rem; }}
-      .kal-card li {{ font-size: .89rem; margin-bottom: .3rem; color: var(--kal-ink-soft); }}
+      .kal-card ul {{ margin: .85rem 0 0; padding-left: 0; list-style: none; }}
+      .kal-card li {{
+        font-size: .86rem; margin-bottom: .45rem; color: var(--kal-ink-soft);
+        padding-left: 1.15rem; position: relative; line-height: 1.45;
+      }}
+      .kal-card li::before {{
+        content: ""; position: absolute; left: 0; top: .52em;
+        width: 5px; height: 5px; border-radius: 50%;
+        background: var(--kal-muted);
+      }}
       .kal-card.is-featured {{
-        border-color: var(--kal-accent);
-        box-shadow: 0 0 0 1px var(--kal-accent), var(--kal-shadow-lift);
+        border-color: var(--kal-border-strong);
+        background: var(--kal-surface-alt);
       }}
 
       /* -------------------------------------------------------- veredicto */
 
       .kal-verdict {{
-        display: flex; align-items: flex-start; gap: .75rem;
-        border-radius: var(--kal-radius); padding: .95rem 1.1rem;
-        border: 1px solid; margin-top: .3rem;
+        display: flex; align-items: flex-start; gap: .7rem;
+        border-radius: var(--kal-radius); padding: .9rem 1.1rem;
+        border: 1px solid; margin-top: .45rem;
       }}
       .kal-verdict .dot {{
-        width: 9px; height: 9px; border-radius: 50%; margin-top: .42rem; flex: none;
+        width: 7px; height: 7px; border-radius: 50%; margin-top: .48rem; flex: none;
       }}
-      .kal-verdict .title {{ font-weight: 640; font-size: .96rem; margin: 0; }}
-      .kal-verdict .body {{ font-size: .88rem; margin: .18rem 0 0; opacity: .92; }}
-      .kal-verdict .value {{ font-family: {MONO_STACK}; font-size: .92rem; }}
+      .kal-verdict .title {{
+        font-weight: 600; font-size: .93rem; margin: 0; letter-spacing: -.008em;
+      }}
+      .kal-verdict .body {{
+        font-size: .85rem; margin: .22rem 0 0; color: var(--kal-ink-soft);
+        font-weight: 400; line-height: 1.5;
+      }}
+      .kal-verdict .value {{
+        font-family: {MONO_STACK}; font-size: .88rem; opacity: .85;
+        margin-left: .4rem;
+      }}
 
-      .kal-verdict.ok  {{ background: {p['ok_soft']};  border-color: #A7E3C6; color: var(--kal-ok); }}
-      .kal-verdict.bad {{ background: {p['bad_soft']}; border-color: #F3B5AE; color: var(--kal-bad); }}
-      .kal-verdict.warn{{ background: {p['warn_soft']};border-color: #F1D08A; color: var(--kal-warn); }}
+      .kal-verdict.ok  {{ background: var(--kal-ok-soft);  border-color: var(--kal-ok);  color: var(--kal-ok); }}
+      .kal-verdict.bad {{ background: var(--kal-bad-soft); border-color: var(--kal-bad); color: var(--kal-bad); }}
+      .kal-verdict.warn{{ background: var(--kal-warn-soft);border-color: var(--kal-warn);color: var(--kal-warn); }}
       .kal-verdict.ok .dot   {{ background: var(--kal-ok); }}
       .kal-verdict.bad .dot  {{ background: var(--kal-bad); }}
       .kal-verdict.warn .dot {{ background: var(--kal-warn); }}
@@ -332,14 +429,20 @@ def _css() -> str:
       /* ---------------------------------------------------------- pestanas */
 
       [data-baseweb="tab-list"] {{
-        gap: .3rem; border-bottom: 1px solid var(--kal-border);
+        gap: .15rem; border-bottom: 1px solid var(--kal-border);
+        background: transparent;
       }}
       [data-baseweb="tab"] {{
-        font-weight: 560; color: var(--kal-muted);
-        padding: .55rem .9rem;
+        font-weight: 400; color: var(--kal-muted);
+        font-size: .885rem; padding: .6rem .95rem;
+        letter-spacing: -.006em;
       }}
-      [data-baseweb="tab"][aria-selected="true"] {{ color: var(--kal-accent); }}
-      [data-baseweb="tab-highlight"] {{ background: var(--kal-accent); height: 2px; }}
+      [data-baseweb="tab"]:hover {{ color: var(--kal-ink-soft); }}
+      [data-baseweb="tab"][aria-selected="true"] {{
+        color: var(--kal-ink); font-weight: 500;
+      }}
+      [data-baseweb="tab-highlight"] {{ background: var(--kal-ink); height: 1.5px; }}
+      [data-baseweb="tab-border"] {{ background: transparent; }}
 
       /* ---------------------------------------------------------- tablas */
 
@@ -353,52 +456,74 @@ def _css() -> str:
 
       [data-testid="stAlert"] {{
         border-radius: var(--kal-radius);
-        border-left-width: 3px;
+        border: 1px solid var(--kal-border);
+        background: var(--kal-surface);
       }}
+      [data-testid="stAlert"] p {{ font-size: .88rem; }}
 
       /* ------------------------------------------------------- subida */
 
       [data-testid="stFileUploader"] section {{
-        border: 1.5px dashed var(--kal-border-strong);
-        border-radius: 12px;
+        border: 1px dashed var(--kal-border-strong);
+        border-radius: var(--kal-radius-lg);
         background: var(--kal-surface);
-        transition: all .15s ease;
+        padding: 1.1rem;
+        transition: border-color .15s ease, background .15s ease;
       }}
       [data-testid="stFileUploader"] section:hover {{
-        border-color: var(--kal-accent);
-        background: var(--kal-accent-soft);
+        border-color: var(--kal-ink);
+        background: var(--kal-surface-alt);
       }}
+      [data-testid="stFileUploader"] small {{ color: var(--kal-muted); }}
 
       /* -------------------------------------------------------- lateral */
 
       [data-testid="stSidebar"] {{
-        background: var(--kal-surface);
+        background: var(--kal-bg);
         border-right: 1px solid var(--kal-border);
       }}
-      [data-testid="stSidebar"] .block-container {{ padding-top: 1.6rem; }}
-      [data-testid="stSidebarUserContent"] hr {{ border-color: var(--kal-border); }}
+      [data-testid="stSidebar"] .block-container {{ padding-top: 1.8rem; }}
+
+      /* --------------------------------------------------------- barra */
+
+      [data-testid="stProgress"] > div > div {{
+        background: var(--kal-surface-alt);
+        border-radius: var(--kal-pill);
+      }}
+      [data-testid="stProgress"] > div > div > div {{
+        background: var(--kal-ink);
+        border-radius: var(--kal-pill);
+      }}
 
       /* -------------------------------------------------------- separador */
 
-      hr, [data-testid="stDivider"] {{ border-color: var(--kal-border) !important; }}
+      hr, [data-testid="stDivider"] {{
+        border-color: var(--kal-border) !important;
+        margin: 2rem 0 !important;
+      }}
 
       /* ---------------------------------------------------------- movil */
 
       @media (max-width: 640px) {{
-        .kal-hero h1 {{ font-size: 1.8rem; }}
+        h1, .kal-hero h1 {{ font-size: 1.72rem; }}
         .block-container {{ padding-left: 1rem; padding-right: 1rem; }}
-        [data-testid="stMetricValue"] {{ font-size: 1.45rem; }}
+        [data-testid="stMetricValue"] {{ font-size: 1.35rem; }}
+        .kal-card {{ padding: 1.2rem; }}
       }}
     </style>
     """
 
 
-def inject_styles() -> None:
-    """Aplica el sistema de diseño. Se llama una vez, tras set_page_config."""
-    st.markdown(_css(), unsafe_allow_html=True)
+def inject_styles(mode: str = "dark") -> None:
+    """Aplica el sistema de diseño. Se llama una vez, tras set_page_config.
+
+    `mode` acepta "dark" o "light". Se despliega la oscura; la clara existe
+    para el día que un cliente la pida y no haya que rehacer nada.
+    """
+    st.markdown(_css(LIGHT if mode == "light" else DARK), unsafe_allow_html=True)
 
 
-def brand(tagline: str = "Calidad de datos", size: int = 34) -> None:
+def brand(tagline: str = "Calidad de datos", size: int = 26) -> None:
     """Bloque de marca: logotipo, nombre y descriptor."""
     st.markdown(
         _one_line(f"""
@@ -432,8 +557,8 @@ def hero(title: str, lead: str, eyebrow: str = "") -> None:
 def verdict(kind: str, title: str, body: str = "", value: str = "") -> None:
     """Resultado de una comprobación: válido, sospechoso o inválido.
 
-    `kind` es "ok", "warn" o "bad". Es el elemento que más se ve del producto,
-    así que tiene forma propia en lugar de un `st.success` genérico.
+    `kind` es "ok", "warn" o "bad". Es lo único de la interfaz que lleva color
+    saturado, porque es la única información que de verdad tiene que gritar.
     """
     trozo_valor = f'<span class="value">{value}</span>' if value else ""
     trozo_cuerpo = f'<p class="body">{body}</p>' if body else ""
@@ -442,7 +567,7 @@ def verdict(kind: str, title: str, body: str = "", value: str = "") -> None:
         <div class="kal-verdict {kind}">
           <span class="dot"></span>
           <div>
-            <p class="title">{title} {trozo_valor}</p>
+            <p class="title">{title}{trozo_valor}</p>
             {trozo_cuerpo}
           </div>
         </div>
