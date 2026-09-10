@@ -30,6 +30,7 @@ from ..core.engine import CleaningEngine, CleanOptions
 from ..core.pseudonymize import Pseudonymizer
 from ..db import Repository
 from ..security.passwords import hash_api_key
+from .ratelimit import RateLimiter, client_key
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,13 @@ app = FastAPI(
     ),
     docs_url="/docs",
 )
+
+#: Un limitador para el punto publico, contado por direccion IP, y otro para
+#: los clientes con clave, contado por organizacion. Separados a proposito: el
+#: abuso anonimo y el de un cliente que paga son problemas distintos y no deben
+#: gastarse la misma cuota.
+_public_limiter = RateLimiter()
+_org_limiter = RateLimiter()
 
 _repository: Repository | None = None
 
@@ -90,6 +98,29 @@ class ValidateRequest(BaseModel):
 
 # ------------------------------------------------------------- autenticación
 
+def _enforce_limit(limiter: RateLimiter, key: str, plan: str) -> None:
+    """Cobra una peticion al limite y corta con 429 si se ha pasado.
+
+    La cabecera Retry-After no es un adorno: es la que hace que un cliente bien
+    programado espere lo justo en vez de reintentar en bucle y empeorarlo.
+    """
+    decision = limiter.check(key, plan)
+    if decision.allowed:
+        return
+    raise HTTPException(
+        429,
+        detail=(
+            f"Has superado el limite de {decision.limit} peticiones por minuto. "
+            f"Reintenta en {decision.retry_after} segundos."
+        ),
+        headers={
+            "Retry-After": str(decision.retry_after),
+            "X-RateLimit-Limit": str(decision.limit),
+            "X-RateLimit-Remaining": "0",
+        },
+    )
+
+
 async def require_org(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
@@ -126,6 +157,10 @@ async def require_org(
             f"Se requiere Growth o superior.",
         )
 
+    # El limite se cobra despues de comprobar el plan, para que un cliente de
+    # Scale tenga su cuota alta y no la del plan mas bajo.
+    _enforce_limit(_org_limiter, f"org:{org['org_id']}", plan.key)
+
     return {**org, "plan": plan.key, "status": subscription.get("status")}
 
 
@@ -149,11 +184,22 @@ async def healthz() -> dict[str, str]:
 
 
 @app.post("/v1/validate", tags=["validación"])
-async def validate_single(payload: ValidateRequest) -> dict[str, Any]:
-    """Valida un único valor. Abierto, sin autenticación y con límite de tamaño.
+async def validate_single(payload: ValidateRequest, request: Request) -> dict[str, Any]:
+    """Valida un único valor. Abierto, sin autenticación y con límite por IP.
 
-    Es deliberadamente gratis: es la demostración del producto.
+    Es deliberadamente gratis: es la demostración del producto. Precisamente
+    por estar abierto es el punto que más falta le hace un freno, porque es el
+    único que puede llamar cualquiera sin identificarse.
     """
+    _enforce_limit(
+        _public_limiter,
+        "ip:" + client_key(
+            request.headers.get("x-forwarded-for"),
+            request.client.host if request.client else None,
+        ),
+        "public",
+    )
+
     from ..core.validators.contact import (
         validate_email, validate_phone_es, validate_postal_code_es,
     )

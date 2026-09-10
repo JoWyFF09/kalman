@@ -81,13 +81,13 @@ class StripeGateway:
         organización no.
         """
         try:
-            found = self._client.customers.search(
+            found = self._client.v1.customers.search(
                 params={"query": f"metadata['org_id']:'{org_id}'", "limit": 1}
             )
             if found.data:
                 return found.data[0].id
 
-            created = self._client.customers.create(
+            created = self._client.v1.customers.create(
                 params={
                     "email": email,
                     "name": org_name,
@@ -121,7 +121,7 @@ class StripeGateway:
             subscription_data["trial_period_days"] = TRIAL_DAYS
 
         try:
-            session = self._client.checkout.sessions.create(
+            session = self._client.v1.checkout.sessions.create(
                 params={
                     "mode": "subscription",
                     "customer": customer_id,
@@ -159,7 +159,7 @@ class StripeGateway:
         de un flujo delicado sin ninguna ventaja.
         """
         try:
-            session = self._client.billing_portal.sessions.create(
+            session = self._client.v1.billing_portal.sessions.create(
                 params={
                     "customer": customer_id,
                     "return_url": f"{self._app_url}/",
@@ -178,7 +178,7 @@ class StripeGateway:
         webhook, no como camino normal. El camino normal es el webhook.
         """
         try:
-            subscription = self._client.subscriptions.retrieve(subscription_id)
+            subscription = self._client.v1.subscriptions.retrieve(subscription_id)
             return dict(subscription)
         except stripe.error.StripeError as exc:
             raise BillingError("No se ha podido leer la suscripción.") from exc

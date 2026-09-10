@@ -17,7 +17,23 @@ pytest.importorskip("fastapi", reason="La API requiere FastAPI.")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from kalman.api.main import app  # noqa: E402
+from kalman.api.main import _org_limiter, _public_limiter, app  # noqa: E402
+from kalman.api.ratelimit import LIMITS_PER_MINUTE  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _limites_limpios():
+    """Cada prueba empieza con la cuota entera.
+
+    Sin esto, una prueba que gasta peticiones deja sin cuota a la siguiente y
+    los fallos aparecen o no segun el orden de ejecucion, que es la peor clase
+    de prueba fragil.
+    """
+    _public_limiter.reset()
+    _org_limiter.reset()
+    yield
+    _public_limiter.reset()
+    _org_limiter.reset()
 
 
 @pytest.fixture
@@ -106,3 +122,35 @@ def test_la_documentacion_esta_publicada(client: TestClient) -> None:
     esquema = client.get("/openapi.json").json()
     assert "/v1/clean" in esquema["paths"]
     assert "/v1/validate" in esquema["paths"]
+
+
+# ------------------------------------------------------ limite de peticiones
+
+def test_el_punto_publico_corta_al_pasarse(client: TestClient) -> None:
+    """Es el unico punto que puede llamar cualquiera sin identificarse."""
+    cuerpo = {"kind": "tax_id", "value": "B65410011"}
+    tope = LIMITS_PER_MINUTE["public"]
+
+    for _ in range(tope):
+        assert client.post("/v1/validate", json=cuerpo).status_code == 200
+
+    excedida = client.post("/v1/validate", json=cuerpo)
+    assert excedida.status_code == 429
+
+
+def test_el_429_dice_cuanto_esperar(client: TestClient) -> None:
+    """Sin Retry-After un cliente reintenta en bucle y empeora la situacion."""
+    cuerpo = {"kind": "tax_id", "value": "B65410011"}
+    for _ in range(LIMITS_PER_MINUTE["public"] + 1):
+        respuesta = client.post("/v1/validate", json=cuerpo)
+
+    assert respuesta.status_code == 429
+    assert int(respuesta.headers["Retry-After"]) >= 1
+    assert respuesta.headers["X-RateLimit-Limit"] == str(LIMITS_PER_MINUTE["public"])
+    assert "por minuto" in respuesta.json()["detail"]
+
+
+def test_el_healthz_no_se_limita(client: TestClient) -> None:
+    """Si la sonda de vida se limita, el servicio se declara caido a si mismo."""
+    for _ in range(LIMITS_PER_MINUTE["public"] + 20):
+        assert client.get("/healthz").status_code == 200

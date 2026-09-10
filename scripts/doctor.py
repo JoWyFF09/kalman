@@ -180,7 +180,7 @@ def revisar_stripe() -> None:
 
     try:
         cliente = stripe.StripeClient(clave)
-        productos = cliente.products.list(params={"limit": 3})
+        productos = cliente.v1.products.list(params={"limit": 3})
         print(f"{OK} Clave valida. Productos visibles: {len(productos.data)}")
         for producto in productos.data:
             print(f"         - {producto.name}")

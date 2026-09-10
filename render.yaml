@@ -1,0 +1,88 @@
+# Despliegue en Render. Ver docs/DESPLIEGUE.md para los pasos.
+#
+# Por que dos servicios y no uno
+# ------------------------------
+# El webhook de Stripe es una peticion POST que Stripe manda a una direccion
+# publica. Streamlit no sirve rutas propias, solo su interfaz, asi que no puede
+# recibirlo. La API con FastAPI si.
+#
+# Por eso hay dos: la API, que atiende el webhook y a los clientes que integran
+# Kalman en su proceso, y la aplicacion, que es la pantalla donde entra el
+# cliente. Comparten la misma base de datos y el mismo codigo.
+#
+# Los secretos NO van aqui. Todos llevan "sync: false", que le dice a Render
+# que los pida en su panel y no los lea del repositorio. Un secreto en un
+# fichero de configuracion versionado es un secreto publicado.
+
+services:
+  # ------------------------------------------------------------------- API
+  - type: web
+    name: kalman-api
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: pip install --upgrade pip && pip install -e ".[api,db,billing]"
+    startCommand: uvicorn kalman.api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: KALMAN_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: KALMAN_PSEUDONYM_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_STARTER
+        sync: false
+      - key: STRIPE_PRICE_GROWTH
+        sync: false
+      - key: STRIPE_PRICE_SCALE
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: SUPPORT_EMAIL
+        sync: false
+
+  # ----------------------------------------------------------- aplicacion
+  - type: web
+    name: kalman-app
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: pip install --upgrade pip && pip install -e ".[web,db,billing]"
+    startCommand: >-
+      streamlit run kalman/web/app.py
+      --server.port $PORT
+      --server.address 0.0.0.0
+      --server.headless true
+      --browser.gatherUsageStats false
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: KALMAN_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: KALMAN_PSEUDONYM_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_STARTER
+        sync: false
+      - key: STRIPE_PRICE_GROWTH
+        sync: false
+      - key: STRIPE_PRICE_SCALE
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: SUPPORT_EMAIL
+        sync: false
