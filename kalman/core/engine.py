@@ -17,7 +17,7 @@ import pandas as pd
 
 from . import outliers as outliers_mod
 from .dedupe import DuplicateGroup, find_duplicates
-from .normalize import collapse_spaces, name_looks_synthetic, title_case_name
+from .normalize import collapse_spaces, name_looks_synthetic, text_value, title_case_name
 from .pseudonymize import Pseudonymizer, mask_email, mask_phone, mask_tax_id
 from .schema_map import ColumnMatch, detect_schema
 from .types import Action, CleanReport, FieldResult, Finding, Severity
@@ -58,6 +58,21 @@ def _apply_proposals(
     en pandas 2.x, así que la columna se amplía a tipo objeto antes de tocarla.
 
     Se agrupa por columna para convertir una sola vez y no una por celda.
+
+    Y se convierte la columna **entera** a texto, no sólo las celdas
+    corregidas. Dejarla mezclada, con enteros y cadenas a la vez, traía dos
+    problemas y los dos se vieron en producción:
+
+    1. Al pintarla, Streamlit deduce el tipo de las primeras filas y revienta
+       al llegar a la corregida, con "Could not convert '05046' with type str:
+       tried to convert to int64". Lo apaña solo, pero deja un error por cada
+       análisis y ralentiza la página.
+    2. Peor: al exportar el CSV, las filas no corregidas siguen siendo números
+       y vuelven a perder el cero inicial. La corrección se deshacía sola en el
+       fichero que el cliente se lleva.
+
+    Un código postal o un teléfono no son cantidades, son identificadores. Si
+    hace falta escribir uno como texto, toda la columna es texto.
     """
     by_column: dict[str, list[tuple[int, object]]] = {}
     for (row, column), value in proposals.items():
@@ -65,13 +80,24 @@ def _apply_proposals(
 
     for column, changes in by_column.items():
         series = df[column]
-        needs_object = series.dtype != object and any(
+        needs_text = series.dtype != object and any(
             isinstance(value, str) for _, value in changes
         )
-        if needs_object:
-            df[column] = series.astype(object)
+        if needs_text:
+            df[column] = _column_as_text(series)
         for row, value in changes:
             df.at[row, column] = value
+
+
+def _column_as_text(series: pd.Series) -> pd.Series:
+    """Pasa una columna entera a texto conservando los huecos.
+
+    No se usa `astype(str)` porque convierte los nulos en la cadena "nan", que
+    acaba impresa tal cual en el informe del cliente. Y se pasa por
+    `text_value` para que un 612345678 leído como decimal no quede como
+    "612345678.0".
+    """
+    return series.map(lambda v: None if pd.isna(v) else text_value(v))
 
 
 @dataclass(slots=True)

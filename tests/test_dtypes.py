@@ -149,3 +149,67 @@ def test_fichero_realista_no_marca_todo_como_invalido() -> None:
 
     assert resultado.report.rows_valid >= filas - 5
     assert resultado.report.counts_by_rule().get("name.synthetic", 0) == 0
+
+
+# ------------------------------------- columnas homogeneas para poder pintarlas
+
+def test_la_columna_corregida_queda_toda_en_texto() -> None:
+    """Regresion, vista en produccion.
+
+    Al corregir el CP de Alava la columna quedaba mezclada: unos valores
+    enteros y otros cadenas. Eso rompia el pintado de la tabla y, peor, al
+    exportar el CSV las filas no corregidas volvian a perder el cero inicial.
+    """
+    df = pd.DataFrame({"CP": [1001, 28001, 8001], "Email": ["a@b.com"] * 3})
+    resultado = CleaningEngine().run(df)
+    todos = pd.concat([resultado.valid, resultado.quarantine])
+
+    tipos = {type(v).__name__ for v in todos["CP"] if v is not None}
+    assert tipos == {"str"}, f"la columna quedo mezclada: {tipos}"
+    assert set(todos["CP"]) == {"01001", "28001", "08001"}
+
+
+def test_la_tabla_corregida_se_puede_pintar() -> None:
+    """Reproduce exactamente lo que hace Streamlit al mostrar un DataFrame.
+
+    Streamlit serializa a Arrow, y una columna con enteros y cadenas a la vez
+    lanza ArrowInvalid. En produccion salia:
+
+        Could not convert '05046' with type str: tried to convert to int64
+    """
+    pa = pytest.importorskip("pyarrow", reason="Streamlit usa pyarrow para pintar.")
+
+    df = pd.DataFrame({
+        "CP": [1001, 28001, 8001, 2001],
+        "Telefono": [612345678, 677889900, 600111222, None],
+        "Email": ["a@b.com"] * 4,
+    })
+    resultado = CleaningEngine().run(df, CleanOptions(detect_duplicates=False))
+
+    for tabla in (resultado.valid, resultado.quarantine):
+        if not tabla.empty:
+            pa.Table.from_pandas(tabla, preserve_index=False)
+
+
+def test_los_huecos_siguen_siendo_huecos() -> None:
+    """Un `astype(str)` a secas convertiria el vacio en la cadena "nan".
+
+    Eso acaba impreso tal cual en el CSV que se lleva el cliente, y ademas
+    deja de contarse como dato ausente. Se comprueba lo que de verdad importa:
+    que el hueco siga siendo un hueco y que no aparezca escrito en el fichero.
+    """
+    df = pd.DataFrame({"CP": [1001, None, 28001], "Email": ["a@b.com"] * 3})
+    resultado = CleaningEngine().run(df, CleanOptions(detect_duplicates=False))
+    todos = pd.concat([resultado.valid, resultado.quarantine])
+
+    assert todos["CP"].isna().sum() == 1
+    assert "nan" not in todos.to_csv(index=False).lower()
+
+
+def test_una_columna_sin_correcciones_no_se_convierte() -> None:
+    """Convertir a texto lo que nadie ha tocado estropearia los importes."""
+    df = pd.DataFrame({"Facturacion": [120000.5, 85000.0], "CP": ["28001", "08001"]})
+    resultado = CleaningEngine().run(df, CleanOptions(detect_duplicates=False))
+    todos = pd.concat([resultado.valid, resultado.quarantine])
+
+    assert pd.api.types.is_numeric_dtype(todos["Facturacion"])
