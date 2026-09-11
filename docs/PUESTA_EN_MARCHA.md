@@ -70,7 +70,12 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 Va en `KALMAN_PSEUDONYM_KEY`. Guárdala también fuera del servidor. Si la
 pierdes, los seudónimos ya emitidos dejan de poder cruzarse con lotes nuevos.
 
-### 4. Crear tu organización y tu usuario
+### 4. Crear TU organización y tu usuario
+
+Esto es sólo para ti. **Tus clientes no necesitan que hagas nada**: se
+crean la cuenta ellos mismos desde la pestaña "Crear cuenta" de la
+aplicación, y entran directamente en el plan gratuito.
+
 
 ```bash
 pip install -e ".[web,api,db,billing]"

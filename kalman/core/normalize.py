@@ -180,3 +180,26 @@ def name_looks_synthetic(name: object) -> tuple[bool, str]:
     if normalize_key(text) in {"test", "prueba", "asdf", "nombre", "cliente", "n a"}:
         return True, "Valor de relleno de formulario."
     return False, ""
+
+
+_SLUG_INVALIDO_RE = re.compile(r"[^a-z0-9]+")
+
+
+def slugify(text: object, fallback: str = "organizacion") -> str:
+    """Convierte un nombre en un identificador apto para una URL.
+
+    "Asesoría Gómez & Hijos, S.L." queda como "asesoria-gomez-hijos-sl".
+
+    La eñe sí se transcribe aquí, al contrario que en `strip_accents`. En una
+    comparación de apellidos distinguir Peña de Pena importa; en una URL, una
+    eñe sólo da problemas.
+    """
+    plano = unicodedata.normalize("NFKD", str(text).replace("ñ", "n").replace("Ñ", "N"))
+    ascii_puro = plano.encode("ascii", "ignore").decode().lower()
+    slug = _SLUG_INVALIDO_RE.sub("-", ascii_puro).strip("-")
+
+    # El esquema exige empezar por letra o dígito y medir entre 2 y 63.
+    slug = slug[:63].strip("-")
+    if len(slug) < 2:
+        return fallback
+    return slug

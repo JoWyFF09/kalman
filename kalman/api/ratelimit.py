@@ -35,6 +35,10 @@ from dataclasses import dataclass
 #: Peticiones por minuto según el plan. El punto público es el más restrictivo
 #: porque es el único que puede usar cualquiera sin identificarse.
 LIMITS_PER_MINUTE: dict[str, int] = {
+    # Darse de alta escribe en la base de datos sin que nadie se haya
+    # identificado, asi que es el punto mas abusable de todos. Cinco por
+    # minuto sobra para una persona y arruina un bucle.
+    "signup": 5,
     "public": 30,
     "free": 60,
     "starter": 60,

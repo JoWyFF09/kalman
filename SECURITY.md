@@ -30,6 +30,38 @@ un correo en una caja de texto y la aplicación desbloqueaba el producto si ese
 correo tenía suscripción. El correo de un cliente aparece en su web y en su
 firma, así que cualquiera entraba gratis.
 
+### Alta de autoservicio
+
+Cualquiera puede crear una cuenta desde la propia aplicación. Lo que protege
+ese camino:
+
+- **Cinco altas por minuto y por dirección.** Registrarse escribe en la base de
+  datos sin que nadie se haya identificado, así que es el punto más abusable de
+  toda la aplicación.
+- **Transacción única.** La organización, su suscripción y su primer usuario se
+  crean de una vez. Si algo falla no queda una organización huérfana sin nadie
+  que pueda entrar en ella, con el identificador quemado para siempre.
+- **Política de contraseñas** aplicada antes de abrir la transacción.
+- **Cada alta queda en el registro de auditoría.**
+- **El error crudo nunca se enseña**, porque puede llevar dentro la cadena de
+  conexión a la base de datos.
+
+**El email no se verifica todavía, y conviene saberlo.** Alguien puede
+registrarse con una dirección que no es suya. Hoy el daño posible es pequeño:
+el plan gratuito está limitado a 2.000 filas al mes y no da acceso a nada de
+otro cliente, porque el aislamiento lo impone PostgreSQL.
+
+Deja de ser aceptable en cuanto ocurra cualquiera de estas dos cosas:
+
+- que se empiece a enviar correo a esas direcciones, porque entonces el
+  producto se convierte en una herramienta para mandar correo en nombre de
+  otro,
+- o que un cliente que paga invite a compañeros de equipo, porque ahí el email
+  pasa a ser una credencial.
+
+Antes de eso hay que añadir verificación por enlace, con un testigo de un solo
+uso y caducidad corta.
+
 ### Aislamiento entre clientes
 
 Además del filtro en cada consulta, PostgreSQL aplica **seguridad a nivel de

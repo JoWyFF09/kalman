@@ -41,8 +41,11 @@ from kalman.billing.webhooks import entitlement_is_active  # noqa: E402
 from kalman.config import get_settings  # noqa: E402
 from kalman.core.engine import CleaningEngine, CleanOptions  # noqa: E402
 from kalman.core.pseudonymize import Pseudonymizer  # noqa: E402
+from kalman.api.ratelimit import RateLimiter, client_key  # noqa: E402
 from kalman.db import Repository  # noqa: E402
+from kalman.db.repository import RegistrationError  # noqa: E402
 from kalman.reporting.pdf import CostAssumption, build_report  # noqa: E402
+from kalman.security.passwords import MIN_PASSWORD_LENGTH, WeakPasswordError  # noqa: E402
 from kalman.reporting.worklist import build_worklist, summary_line, to_excel  # noqa: E402
 from kalman.web.theme import brand, hero, inject_styles, note, plan_card  # noqa: E402
 
@@ -73,37 +76,135 @@ def get_gateway() -> StripeGateway:
     return StripeGateway(settings.stripe_secret_key, settings.app_url, price_ids)
 
 
+#: Limitador de altas, contado por direccion. El ritmo lo fija el plan
+#: "signup" de kalman.api.ratelimit.
+_signup_limiter = RateLimiter()
+
+
+def _visitante() -> str:
+    """Identifica al visitante lo mejor que se puede desde Streamlit.
+
+    Detras del proxy de Render la direccion real viene en X-Forwarded-For.
+    Si no hubiera nada se cae a una etiqueta comun, que es conservador: en el
+    peor caso limita de mas, nunca de menos.
+    """
+    try:
+        cabeceras = st.context.headers or {}
+        reenviada = cabeceras.get("X-Forwarded-For") or cabeceras.get("x-forwarded-for")
+        return client_key(reenviada, st.context.ip_address)
+    except Exception:
+        return "desconocido"
+
+
 # ------------------------------------------------------------------ sesión
 
 def login_screen() -> None:
-    """Pantalla de acceso.
+    """Pantalla de entrada, con acceso y alta.
 
-    El mensaje de error es siempre el mismo, exista el usuario o no. Decir
-    "usuario no encontrado" le confirma a un atacante qué correos están dados
-    de alta, que es la mitad del trabajo.
+    Hasta ahora las cuentas se creaban ejecutando un script a mano por cada
+    cliente. Eso funciona con uno y es imposible con veinte, así que el alta
+    es de autoservicio.
     """
     left, middle, right = st.columns([1, 2, 1])
     with middle:
         brand("Señal, no ruido, en los datos de tu empresa")
 
-        with st.form("login"):
-            st.markdown("#### Acceso")
-            email = st.text_input("Email")
-            password = st.text_input("Contraseña", type="password")
-            submitted = st.form_submit_button(
-                "Entrar", width="stretch", type="primary"
-            )
+        entrar, registrarse = st.tabs(["Entrar", "Crear cuenta"])
 
-        if submitted:
-            user = get_repository().authenticate(email, password)
-            if user is None:
-                st.error("Credenciales incorrectas.")
-                return
-            st.session_state.user = user
-            get_repository().record_audit(
-                user["org_id"], "auth.login", {}, actor_id=user["id"]
-            )
-            st.rerun()
+        with entrar:
+            _formulario_acceso()
+
+        with registrarse:
+            _formulario_alta()
+
+
+def _formulario_acceso() -> None:
+    """Acceso de un cliente que ya tiene cuenta.
+
+    El mensaje de error es siempre el mismo, exista el usuario o no. Decir
+    "usuario no encontrado" le confirma a un atacante qué correos están dados
+    de alta, que es la mitad del trabajo.
+    """
+    with st.form("login"):
+        email = st.text_input("Email")
+        password = st.text_input("Contraseña", type="password")
+        submitted = st.form_submit_button("Entrar", width="stretch", type="primary")
+
+    if not submitted:
+        return
+
+    user = get_repository().authenticate(email, password)
+    if user is None:
+        st.error("Credenciales incorrectas.")
+        return
+
+    _iniciar_sesion(user, "auth.login")
+
+
+def _formulario_alta() -> None:
+    """Alta de una empresa nueva, sin que nadie tenga que intervenir."""
+    with st.form("signup"):
+        org_name = st.text_input(
+            "Nombre de tu empresa",
+            placeholder="Asesoría Gómez S.L.",
+        )
+        email = st.text_input("Tu email de trabajo", key="alta_email")
+        password = st.text_input(
+            "Contraseña", type="password", key="alta_password",
+            help=f"Mínimo {MIN_PASSWORD_LENGTH} caracteres. "
+                 "Una frase larga es más segura y más fácil de recordar.",
+        )
+        repetida = st.text_input("Repite la contraseña", type="password")
+        submitted = st.form_submit_button(
+            "Crear cuenta gratis", width="stretch", type="primary"
+        )
+
+    note(
+        f"El plan gratuito incluye {PLANS['free'].monthly_rows:,} filas al mes "
+        "y no pide tarjeta. Nada de lo que subas se guarda: el fichero se "
+        "procesa en memoria y se descarta.".replace(",", ".")
+    )
+
+    if not submitted:
+        return
+
+    if password != repetida:
+        st.error("Las dos contraseñas no coinciden.")
+        return
+
+    # El freno va aquí, después de las comprobaciones que no tocan la base,
+    # para que un error de tecleo no consuma cuota de alta.
+    permitido = _signup_limiter.check(f"alta:{_visitante()}", "signup")
+    if not permitido.allowed:
+        st.error(
+            "Demasiados intentos de registro desde esta conexión. "
+            f"Espera {permitido.retry_after} segundos."
+        )
+        return
+
+    try:
+        user = get_repository().register_organization(org_name, email, password)
+    except WeakPasswordError as exc:
+        st.error(str(exc))
+        return
+    except RegistrationError as exc:
+        st.error(str(exc))
+        return
+    except Exception:
+        # No se enseña el error crudo: puede llevar dentro la cadena de
+        # conexión a la base de datos.
+        st.error("No se ha podido crear la cuenta. Inténtalo de nuevo en un minuto.")
+        raise
+
+    st.success(f"Cuenta creada para {user['org_name']}. Entrando...")
+    _iniciar_sesion(user, "auth.signup")
+
+
+def _iniciar_sesion(user: dict, accion: str) -> None:
+    """Guarda la sesión y recarga. Deja constancia en el registro de auditoría."""
+    st.session_state.user = user
+    get_repository().record_audit(user["org_id"], accion, {}, actor_id=user["id"])
+    st.rerun()
 
 
 def current_user() -> dict | None:

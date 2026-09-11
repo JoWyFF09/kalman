@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import secrets
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from typing import Any
@@ -22,7 +23,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from ..security.passwords import hash_api_key, needs_rehash, hash_password, verify_password
+from ..core.normalize import slugify
+from ..security.passwords import hash_api_key, hash_password, needs_rehash, verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,42 @@ MAX_FAILED_LOGINS = 5
 #: Minutos de bloqueo. Suficiente para arruinar la fuerza bruta y poco para
 #: que un usuario legítimo que se ha equivocado no llame a soporte.
 LOCKOUT_MINUTES = 15
+
+
+class RegistrationError(RuntimeError):
+    """El alta no se ha podido completar, con un motivo que se le puede enseñar."""
+
+
+def validar_alta(org_name: str, email: str) -> tuple[str, str]:
+    """Limpia y comprueba los datos de un alta antes de tocar la base.
+
+    Está fuera de la clase a propósito: así se puede probar sin levantar una
+    conexión, y los mensajes de error se revisan sin montar una base de datos.
+
+    Los mensajes van dirigidos a la persona que está rellenando el formulario,
+    no al programador. "El email no parece válido" sirve; un ValidationError
+    con una traza, no.
+    """
+    org_name = (org_name or "").strip()
+    email = (email or "").strip().lower()
+
+    if len(org_name) < 2:
+        raise RegistrationError("Escribe el nombre de tu empresa.")
+    if len(org_name) > 120:
+        raise RegistrationError("El nombre de la empresa es demasiado largo.")
+
+    if email.count("@") != 1:
+        raise RegistrationError("El email no parece válido.")
+
+    local, _, dominio = email.partition("@")
+    if not local or "." not in dominio or dominio.startswith(".") or dominio.endswith("."):
+        raise RegistrationError("El email no parece válido.")
+    if len(email) > 254:
+        raise RegistrationError("El email es demasiado largo.")
+    if any(c.isspace() for c in email):
+        raise RegistrationError("El email no puede llevar espacios.")
+
+    return org_name, email
 
 
 class Repository:
@@ -74,6 +112,93 @@ class Repository:
             conn.commit()
 
     # --------------------------------------------------------------- usuarios
+
+    def register_organization(
+        self, org_name: str, email: str, password: str, tax_id: str | None = None
+    ) -> dict[str, Any]:
+        """Da de alta una organización y su primer usuario, en una transacción.
+
+        Es el camino de autoservicio: el cliente se registra solo, sin que
+        nadie le ejecute un script.
+
+        Todo va en una sola transacción a propósito. Si se hicieran en dos
+        pasos y el segundo fallara, por ejemplo porque el email ya existe,
+        quedaría una organización huérfana sin ningún usuario que pueda entrar
+        en ella, y el slug quemado para siempre.
+
+        Devuelve lo mismo que `authenticate`, de modo que quien lo llame pueda
+        iniciar sesión sin un segundo viaje a la base.
+        """
+        org_name, email = validar_alta(org_name, email)
+
+        # La política de contraseñas se comprueba antes de abrir la transacción
+        # para no gastar una conexión en algo que ya se sabe que va a fallar.
+        digest = hash_password(password)
+        base = slugify(org_name)
+
+        with self._pool.connection() as conn:
+            with conn.transaction():
+                existe = conn.execute(
+                    "SELECT 1 FROM users WHERE email = %s", (email,)
+                ).fetchone()
+                if existe:
+                    raise RegistrationError(
+                        "Ya hay una cuenta con ese email. Prueba a iniciar sesión."
+                    )
+
+                slug = self._slug_libre(conn, base)
+
+                org = conn.execute(
+                    "INSERT INTO organizations (slug, name, tax_id)"
+                    " VALUES (%s, %s, %s) RETURNING id",
+                    (slug, org_name, tax_id),
+                ).fetchone()
+                org_id = org["id"]
+
+                conn.execute(
+                    "INSERT INTO subscriptions (org_id, plan, status)"
+                    " VALUES (%s, 'free', 'inactive')",
+                    (org_id,),
+                )
+
+                user = conn.execute(
+                    "INSERT INTO users (org_id, email, password_hash, role)"
+                    " VALUES (%s, %s, %s, 'owner') RETURNING id",
+                    (org_id, email, digest),
+                ).fetchone()
+
+                conn.execute(
+                    "INSERT INTO audit_log (org_id, actor_id, action, metadata)"
+                    " VALUES (%s, %s, 'org.registered', %s)",
+                    (org_id, user["id"], psycopg.types.json.Json({"slug": slug})),
+                )
+
+        return {
+            "id": str(user["id"]),
+            "org_id": str(org_id),
+            "email": email,
+            "role": "owner",
+            "org_name": org_name,
+            "org_slug": slug,
+        }
+
+    @staticmethod
+    def _slug_libre(conn: psycopg.Connection, base: str) -> str:
+        """Encuentra un identificador de URL que no esté cogido.
+
+        Dos gestorías pueden llamarse igual, así que se numeran. Tras varios
+        intentos se recurre al azar, porque un bucle largo dentro de una
+        transacción bloquea la tabla más de lo razonable.
+        """
+        for intento in range(1, 12):
+            candidato = base if intento == 1 else f"{base[:58]}-{intento}"
+            ocupado = conn.execute(
+                "SELECT 1 FROM organizations WHERE slug = %s", (candidato,)
+            ).fetchone()
+            if not ocupado:
+                return candidato
+
+        return f"{base[:52]}-{secrets.token_hex(4)}"
 
     def create_organization(self, slug: str, name: str, tax_id: str | None = None) -> str:
         with self._pool.connection() as conn:
