@@ -143,6 +143,13 @@ class StripeGateway:
                     # inversión del sujeto pasivo dentro de la Unión Europea.
                     "tax_id_collection": {"enabled": True},
                     "billing_address_collection": "required",
+                    # Imprescindible y nada obvio: al pasar un cliente que ya
+                    # existe, Stripe se niega a recoger el NIF y la dirección
+                    # si no se le autoriza expresamente a guardarlos en esa
+                    # ficha. Sin esto la pasarela devuelve
+                    # "Tax ID collection requires updating business name on
+                    # the customer" y el cliente no llega a ver el pago.
+                    "customer_update": {"name": "auto", "address": "auto"},
                 }
             )
             return CheckoutSession(id=session.id, url=session.url)
