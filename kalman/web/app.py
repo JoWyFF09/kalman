@@ -44,8 +44,17 @@ from kalman.core.pseudonymize import Pseudonymizer  # noqa: E402
 from kalman.api.ratelimit import RateLimiter, client_key  # noqa: E402
 from kalman.db import Repository  # noqa: E402
 from kalman.db.repository import RegistrationError  # noqa: E402
+from kalman.legal import PRIVACY, TERMS  # noqa: E402
+from kalman.notifications.email import (  # noqa: E402
+    EmailError,
+    EmailSender,
+    EmailSettings,
+    email_verify_body,
+    password_reset_body,
+)
 from kalman.reporting.pdf import CostAssumption, build_report  # noqa: E402
 from kalman.security.passwords import MIN_PASSWORD_LENGTH, WeakPasswordError  # noqa: E402
+from kalman.security.tokens import TOKEN_LIFETIME_MINUTES  # noqa: E402
 from kalman.reporting.worklist import build_worklist, summary_line, to_excel  # noqa: E402
 from kalman.web.theme import brand, hero, inject_styles, note, plan_card  # noqa: E402
 
@@ -61,6 +70,18 @@ inject_styles()
 @st.cache_resource
 def get_repository() -> Repository:
     return Repository(get_settings().database_url)
+
+
+@st.cache_resource
+def _remitente() -> EmailSender:
+    """Remitente de correo, construido una vez por proceso."""
+    s = get_settings()
+    return EmailSender(
+        EmailSettings(
+            host=s.smtp_host, port=s.smtp_port, user=s.smtp_user,
+            password=s.smtp_password, sender=s.email_from,
+        )
+    )
 
 
 @st.cache_resource
@@ -98,24 +119,43 @@ def _visitante() -> str:
 
 # ------------------------------------------------------------------ sesión
 
-def login_screen() -> None:
-    """Pantalla de entrada, con acceso y alta.
+@st.dialog("Condiciones de uso", width="large")
+def _dialogo_condiciones() -> None:
+    st.markdown(TERMS)
 
-    Hasta ahora las cuentas se creaban ejecutando un script a mano por cada
-    cliente. Eso funciona con uno y es imposible con veinte, así que el alta
-    es de autoservicio.
-    """
+
+@st.dialog("Política de privacidad", width="large")
+def _dialogo_privacidad() -> None:
+    st.markdown(PRIVACY)
+
+
+def login_screen() -> None:
+    """Pantalla de entrada: acceso, alta y recuperación de contraseña."""
     left, middle, right = st.columns([1, 2, 1])
     with middle:
         brand("Señal, no ruido, en los datos de tu empresa")
 
-        entrar, registrarse = st.tabs(["Entrar", "Crear cuenta"])
+        if st.session_state.get("modo_auth") == "recuperar":
+            _formulario_recuperar()
+            return
 
+        entrar, registrarse = st.tabs(["Entrar", "Crear cuenta"])
         with entrar:
             _formulario_acceso()
-
         with registrarse:
             _formulario_alta()
+
+        _pie_legal()
+
+
+def _pie_legal() -> None:
+    """Enlaces a los textos legales. Visibles antes de crear ninguna cuenta."""
+    st.divider()
+    izquierda, derecha = st.columns(2)
+    if izquierda.button("Condiciones de uso", width="stretch", key="ver_condiciones"):
+        _dialogo_condiciones()
+    if derecha.button("Política de privacidad", width="stretch", key="ver_privacidad"):
+        _dialogo_privacidad()
 
 
 def _formulario_acceso() -> None:
@@ -129,6 +169,10 @@ def _formulario_acceso() -> None:
         email = st.text_input("Email")
         password = st.text_input("Contraseña", type="password")
         submitted = st.form_submit_button("Entrar", width="stretch", type="primary")
+
+    if st.button("He olvidado mi contraseña", key="ir_recuperar"):
+        st.session_state.modo_auth = "recuperar"
+        st.rerun()
 
     if not submitted:
         return
@@ -144,10 +188,7 @@ def _formulario_acceso() -> None:
 def _formulario_alta() -> None:
     """Alta de una empresa nueva, sin que nadie tenga que intervenir."""
     with st.form("signup"):
-        org_name = st.text_input(
-            "Nombre de tu empresa",
-            placeholder="Asesoría Gómez S.L.",
-        )
+        org_name = st.text_input("Nombre de tu empresa", placeholder="Asesoría Gómez S.L.")
         email = st.text_input("Tu email de trabajo", key="alta_email")
         password = st.text_input(
             "Contraseña", type="password", key="alta_password",
@@ -155,6 +196,9 @@ def _formulario_alta() -> None:
                  "Una frase larga es más segura y más fácil de recordar.",
         )
         repetida = st.text_input("Repite la contraseña", type="password")
+        acepta = st.checkbox(
+            "He leído y acepto las condiciones de uso y la política de privacidad."
+        )
         submitted = st.form_submit_button(
             "Crear cuenta gratis", width="stretch", type="primary"
         )
@@ -168,12 +212,16 @@ def _formulario_alta() -> None:
     if not submitted:
         return
 
+    # La aceptación se comprueba aquí y se guarda con la hora en la base de
+    # datos. Sin constancia de cuándo aceptó qué versión, el consentimiento no
+    # se puede demostrar.
+    if not acepta:
+        st.error("Tienes que aceptar las condiciones para crear la cuenta.")
+        return
     if password != repetida:
         st.error("Las dos contraseñas no coinciden.")
         return
 
-    # El freno va aquí, después de las comprobaciones que no tocan la base,
-    # para que un error de tecleo no consuma cuota de alta.
     permitido = _signup_limiter.check(f"alta:{_visitante()}", "signup")
     if not permitido.allowed:
         st.error(
@@ -184,10 +232,7 @@ def _formulario_alta() -> None:
 
     try:
         user = get_repository().register_organization(org_name, email, password)
-    except WeakPasswordError as exc:
-        st.error(str(exc))
-        return
-    except RegistrationError as exc:
+    except (WeakPasswordError, RegistrationError) as exc:
         st.error(str(exc))
         return
     except Exception:
@@ -196,13 +241,202 @@ def _formulario_alta() -> None:
         st.error("No se ha podido crear la cuenta. Inténtalo de nuevo en un minuto.")
         raise
 
+    _enviar_verificacion(user, silencioso=True)
     st.success(f"Cuenta creada para {user['org_name']}. Entrando...")
     _iniciar_sesion(user, "auth.signup")
+
+
+def _formulario_recuperar() -> None:
+    """Pide el correo y manda un enlace para elegir una contraseña nueva."""
+    st.markdown("#### Recuperar contraseña")
+    ajustes = get_settings()
+
+    if not ajustes.email_configured:
+        st.warning(
+            "El envío de correo no está configurado en este despliegue, así que "
+            "no se puede recuperar la contraseña automáticamente. Escribe a "
+            f"{ajustes.support_email}."
+        )
+        if st.button("Volver", key="volver_sin_correo"):
+            st.session_state.modo_auth = None
+            st.rerun()
+        return
+
+    with st.form("recuperar"):
+        email = st.text_input("El email con el que te registraste")
+        enviado = st.form_submit_button(
+            "Enviarme el enlace", width="stretch", type="primary"
+        )
+
+    if st.button("Volver al acceso", key="volver_acceso"):
+        st.session_state.modo_auth = None
+        st.rerun()
+
+    if not enviado:
+        return
+
+    permitido = _signup_limiter.check(f"reset:{_visitante()}", "signup")
+    if not permitido.allowed:
+        st.error(f"Demasiadas peticiones. Espera {permitido.retry_after} segundos.")
+        return
+
+    # El mensaje final es el mismo exista la cuenta o no. Si cambiara, este
+    # formulario se convertiría en una forma cómoda de averiguar qué correos
+    # están dados de alta en el servicio.
+    repositorio = get_repository()
+    usuario = repositorio.find_user_by_email(email)
+
+    if usuario is not None:
+        try:
+            testigo = repositorio.create_auth_token(str(usuario["id"]), "password_reset")
+            enlace = f"{ajustes.app_url}/?reset={testigo}"
+            _remitente().send(
+                usuario["email"],
+                "Recuperar tu contraseña de Kalman",
+                password_reset_body(
+                    usuario["org_name"], enlace,
+                    TOKEN_LIFETIME_MINUTES["password_reset"],
+                ),
+            )
+            repositorio.record_audit(
+                str(usuario["org_id"]), "auth.password_reset_requested", {},
+                actor_id=str(usuario["id"]),
+            )
+        except EmailError:
+            st.error("No se ha podido enviar el correo. Inténtalo en unos minutos.")
+            return
+
+    st.success(
+        "Si esa dirección tiene una cuenta, te hemos mandado un enlace. "
+        "Caduca en una hora y sólo sirve una vez. Mira también en la carpeta "
+        "de correo no deseado."
+    )
+
+
+def _pantalla_nueva_contrasena(testigo: str) -> None:
+    """Se abre desde el enlace del correo. Fija una contraseña nueva."""
+    left, middle, right = st.columns([1, 2, 1])
+    with middle:
+        brand("Elige una contraseña nueva")
+
+        usuario = st.session_state.get("reset_user")
+        if usuario is None:
+            usuario = get_repository().consume_auth_token(testigo, "password_reset")
+
+        if usuario is None:
+            st.error(
+                "Este enlace ya no sirve. Puede que haya caducado, que ya lo "
+                "hayas usado o que hayas pedido otro después."
+            )
+            if st.button("Pedir uno nuevo", type="primary"):
+                st.query_params.clear()
+                st.session_state.modo_auth = "recuperar"
+                st.rerun()
+            return
+
+        # El testigo ya se ha canjeado, así que se guarda en la sesión: un
+        # error escribiendo la contraseña no debe obligar a pedir otro correo.
+        st.session_state.reset_user = usuario
+
+        with st.form("nueva_contrasena"):
+            st.caption(f"Cuenta: {usuario['email']}")
+            nueva = st.text_input("Contraseña nueva", type="password")
+            repetida = st.text_input("Repítela", type="password")
+            guardar = st.form_submit_button("Guardar", width="stretch", type="primary")
+
+        if not guardar:
+            return
+        if nueva != repetida:
+            st.error("Las dos contraseñas no coinciden.")
+            return
+
+        try:
+            get_repository().set_password(usuario["id"], nueva)
+        except WeakPasswordError as exc:
+            st.error(str(exc))
+            return
+
+        get_repository().record_audit(
+            usuario["org_id"], "auth.password_reset_done", {}, actor_id=usuario["id"]
+        )
+        st.session_state.pop("reset_user", None)
+        st.query_params.clear()
+        _iniciar_sesion(usuario, "auth.login")
+
+
+def _procesar_verificacion(testigo: str) -> bool:
+    """Marca el correo como confirmado desde el enlace.
+
+    Devuelve si ha funcionado, para que quien llame pueda enseñar la pantalla
+    de acceso en lugar de dejar la página en blanco.
+    """
+    usuario = get_repository().consume_auth_token(testigo, "email_verify")
+    st.query_params.clear()
+
+    if usuario is None:
+        st.error("Este enlace de confirmación ya no sirve. Pide otro desde tu cuenta.")
+        return False
+
+    get_repository().mark_email_verified(usuario["id"])
+    get_repository().record_audit(
+        usuario["org_id"], "auth.email_verified", {}, actor_id=usuario["id"]
+    )
+    _iniciar_sesion(usuario, "auth.login")
+    return True
+
+
+def _enviar_verificacion(user: dict, silencioso: bool = False) -> bool:
+    """Manda el correo de confirmación. Devuelve si se ha enviado."""
+    ajustes = get_settings()
+    if not ajustes.email_configured:
+        if not silencioso:
+            st.warning("El envío de correo no está configurado en este despliegue.")
+        return False
+
+    try:
+        testigo = get_repository().create_auth_token(user["id"], "email_verify")
+        enlace = f"{ajustes.app_url}/?verify={testigo}"
+        _remitente().send(
+            user["email"],
+            "Confirma tu dirección en Kalman",
+            email_verify_body(
+                user["org_name"], enlace,
+                TOKEN_LIFETIME_MINUTES["email_verify"] // 60,
+            ),
+        )
+        return True
+    except EmailError:
+        if not silencioso:
+            st.error("No se ha podido enviar el correo de confirmación.")
+        return False
+
+
+def _aviso_verificacion(user: dict) -> None:
+    """Recuerda confirmar la dirección, sin bloquear el plan gratuito.
+
+    Bloquear la entrada por un correo sin confirmar rompería el alta que acaba
+    de funcionar. La verificación se exige donde de verdad importa, que es
+    antes de contratar un plan de pago.
+    """
+    if not get_settings().email_configured:
+        return
+    if get_repository().is_email_verified(user["id"]):
+        return
+
+    izquierda, derecha = st.columns([4, 1])
+    izquierda.info(
+        f"Confirma tu dirección {user['email']}. Hace falta para contratar un "
+        "plan de pago."
+    )
+    if derecha.button("Reenviar", width="stretch", key="reenviar_verificacion"):
+        if _enviar_verificacion(user):
+            st.success("Correo de confirmación reenviado.")
 
 
 def _iniciar_sesion(user: dict, accion: str) -> None:
     """Guarda la sesión y recarga. Deja constancia en el registro de auditoría."""
     st.session_state.user = user
+    st.session_state.modo_auth = None
     get_repository().record_audit(user["org_id"], accion, {}, actor_id=user["id"])
     st.rerun()
 
@@ -271,6 +505,20 @@ def pricing_section(user: dict) -> None:
                 width="stretch",
                 type="primary" if destacado else "secondary",
             ):
+                # Aquí sí se exige la dirección confirmada. Es donde de verdad
+                # importa: sin ella no se puede mandar una factura ni avisar de
+                # un recibo devuelto, y la cuenta podría no ser de quien dice.
+                if (
+                    get_settings().email_configured
+                    and not get_repository().is_email_verified(user["id"])
+                ):
+                    st.warning(
+                        "Antes de contratar un plan, confirma tu dirección de "
+                        "correo. Tienes el enlace en tu bandeja de entrada."
+                    )
+                    if st.button("Reenviar confirmación", key=f"reenv_{plan.key}"):
+                        _enviar_verificacion(user)
+                    continue
                 try:
                     session = get_gateway().create_checkout(
                         user["org_id"], user["org_name"], user["email"], plan.key,
@@ -547,6 +795,17 @@ def history_section(user: dict) -> None:
 # ----------------------------------------------------------------------- main
 
 def main() -> None:
+    # Los enlaces del correo llegan como parámetros de la dirección y se
+    # atienden antes que nada: quien pincha uno no ha iniciado sesión todavía.
+    params = st.query_params
+    if params.get("reset"):
+        _pantalla_nueva_contrasena(params["reset"])
+        return
+    if params.get("verify"):
+        if not _procesar_verificacion(params["verify"]):
+            login_screen()
+        return
+
     user = current_user()
     if user is None:
         login_screen()
@@ -585,6 +844,7 @@ def main() -> None:
     }
     titulo, entradilla = titulos[page]
     hero(titulo, entradilla)
+    _aviso_verificacion(user)
 
     if page == "Analizar":
         cleaning_section(user, context)

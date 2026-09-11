@@ -96,6 +96,11 @@ class Settings:
     support_email: str
     max_upload_mb: int
     session_ttl_hours: int
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str
+    smtp_password: str
+    email_from: str
 
     @property
     def is_production(self) -> bool:
@@ -104,6 +109,16 @@ class Settings:
     @property
     def stripe_is_live(self) -> bool:
         return self.stripe_secret_key.startswith("sk_live_")
+
+    @property
+    def email_configured(self) -> bool:
+        """Si falta algo, las pantallas que envían correo lo dicen claramente.
+
+        El correo es opcional a propósito: sin él el producto arranca igual en
+        un portátil recién clonado, sólo que recuperar contraseña y verificar
+        la dirección quedan desactivados.
+        """
+        return bool(self.smtp_host and self.smtp_user and self.smtp_password)
 
 
 @functools.lru_cache(maxsize=1)
@@ -132,6 +147,13 @@ def get_settings() -> Settings:
         support_email=_optional("SUPPORT_EMAIL", "soporte@kalman.es"),
         max_upload_mb=int(_optional("MAX_UPLOAD_MB", "50")),
         session_ttl_hours=int(_optional("SESSION_TTL_HOURS", "12")),
+        # Correo transaccional. Opcional: sin esto el producto funciona, pero
+        # recuperar contraseña y verificar el email quedan desactivados.
+        smtp_host=_optional("SMTP_HOST"),
+        smtp_port=int(_optional("SMTP_PORT", "465")),
+        smtp_user=_optional("SMTP_USER"),
+        smtp_password=_optional("SMTP_PASSWORD"),
+        email_from=_optional("EMAIL_FROM") or _optional("SMTP_USER"),
     )
 
     if settings.is_production:

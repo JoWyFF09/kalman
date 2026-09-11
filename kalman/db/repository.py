@@ -25,6 +25,7 @@ from psycopg_pool import ConnectionPool
 
 from ..core.normalize import slugify
 from ..security.passwords import hash_api_key, hash_password, needs_rehash, verify_password
+from ..security.tokens import generate_token, hash_token, is_expired
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +163,9 @@ class Repository:
                 )
 
                 user = conn.execute(
-                    "INSERT INTO users (org_id, email, password_hash, role)"
-                    " VALUES (%s, %s, %s, 'owner') RETURNING id",
+                    "INSERT INTO users (org_id, email, password_hash, role,"
+                    " accepted_terms_at)"
+                    " VALUES (%s, %s, %s, 'owner', now()) RETURNING id",
                     (org_id, email, digest),
                 ).fetchone()
 
@@ -199,6 +201,125 @@ class Repository:
                 return candidato
 
         return f"{base[:52]}-{secrets.token_hex(4)}"
+
+    # ------------------------------------------------- testigos de un solo uso
+
+    def create_auth_token(self, user_id: str, purpose: str) -> str:
+        """Crea un testigo y devuelve el valor que hay que enviar por correo.
+
+        Antes marca como usados los anteriores del mismo tipo. Si alguien pide
+        recuperar su contraseña tres veces, sólo el último enlace debe valer:
+        de lo contrario un correo viejo, quizá reenviado a otra persona, seguiría
+        abriendo la cuenta.
+        """
+        raw, digest, expires = generate_token(purpose)
+
+        with self._pool.connection() as conn:
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE auth_tokens SET used_at = now()"
+                    " WHERE user_id = %s AND purpose = %s AND used_at IS NULL",
+                    (user_id, purpose),
+                )
+                conn.execute(
+                    "INSERT INTO auth_tokens (user_id, purpose, token_hash, expires_at)"
+                    " VALUES (%s, %s, %s, %s)",
+                    (user_id, purpose, digest, expires),
+                )
+        return raw
+
+    def consume_auth_token(self, raw: str, purpose: str) -> dict[str, Any] | None:
+        """Canjea un testigo. Devuelve el usuario, o None si no sirve.
+
+        Un testigo caducado o ya usado devuelve None igual que uno inventado.
+        Distinguirlos en el mensaje le diría a un atacante que ha acertado con
+        un valor real.
+
+        El canje y el marcado van en la misma transacción con un bloqueo de
+        fila. Sin eso, dos peticiones simultáneas con el mismo enlace podrían
+        canjearlo las dos.
+        """
+        if not raw:
+            return None
+
+        with self._pool.connection() as conn:
+            with conn.transaction():
+                fila = conn.execute(
+                    "SELECT t.id, t.expires_at, t.used_at, u.id AS user_id,"
+                    " u.org_id, u.email, u.role, o.name AS org_name, o.slug AS org_slug"
+                    " FROM auth_tokens t"
+                    " JOIN users u ON u.id = t.user_id"
+                    " JOIN organizations o ON o.id = u.org_id"
+                    " WHERE t.token_hash = %s AND t.purpose = %s"
+                    " FOR UPDATE OF t",
+                    (hash_token(raw), purpose),
+                ).fetchone()
+
+                if fila is None or fila["used_at"] is not None:
+                    return None
+                if is_expired(fila["expires_at"]):
+                    return None
+
+                conn.execute(
+                    "UPDATE auth_tokens SET used_at = now() WHERE id = %s",
+                    (fila["id"],),
+                )
+
+        return {
+            "id": str(fila["user_id"]),
+            "org_id": str(fila["org_id"]),
+            "email": fila["email"],
+            "role": fila["role"],
+            "org_name": fila["org_name"],
+            "org_slug": fila["org_slug"],
+        }
+
+    def find_user_by_email(self, email: str) -> dict[str, Any] | None:
+        """Busca un usuario activo por su correo.
+
+        Quien llame a esto NO debe cambiar lo que enseña en pantalla según el
+        resultado. Se usa para decidir si mandar un correo, y el mensaje al
+        usuario es el mismo exista la cuenta o no.
+        """
+        with self._pool.connection() as conn:
+            fila = conn.execute(
+                "SELECT u.id, u.org_id, u.email, o.name AS org_name"
+                " FROM users u JOIN organizations o ON o.id = u.org_id"
+                " WHERE u.email = lower(%s) AND u.is_active",
+                ((email or "").strip(),),
+            ).fetchone()
+        return dict(fila) if fila else None
+
+    def set_password(self, user_id: str, password: str) -> None:
+        """Cambia la contraseña y desbloquea la cuenta.
+
+        Se ponen a cero los intentos fallidos: quien ha demostrado tener acceso
+        a su correo no debe seguir bloqueado por los intentos de otro.
+        """
+        digest = hash_password(password)
+        with self._pool.connection() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash = %s, failed_logins = 0,"
+                " locked_until = NULL WHERE id = %s",
+                (digest, user_id),
+            )
+            conn.commit()
+
+    def mark_email_verified(self, user_id: str) -> None:
+        with self._pool.connection() as conn:
+            conn.execute(
+                "UPDATE users SET email_verified_at = COALESCE(email_verified_at, now())"
+                " WHERE id = %s",
+                (user_id,),
+            )
+            conn.commit()
+
+    def is_email_verified(self, user_id: str) -> bool:
+        with self._pool.connection() as conn:
+            fila = conn.execute(
+                "SELECT email_verified_at FROM users WHERE id = %s", (user_id,)
+            ).fetchone()
+        return bool(fila and fila["email_verified_at"])
 
     def create_organization(self, slug: str, name: str, tax_id: str | None = None) -> str:
         with self._pool.connection() as conn:

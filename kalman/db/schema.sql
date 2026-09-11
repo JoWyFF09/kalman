@@ -2,10 +2,18 @@
 --
 -- Diferencias de fondo con el esquema anterior
 -- --------------------------------------------
--- 1. El aislamiento entre clientes ya no depende de que la aplicación se
---    acuerde de poner "WHERE empresa = ...". Lo impone Postgres con seguridad
---    a nivel de fila. Un fallo en el código deja de ser una fuga de datos
---    entre clientes.
+-- 1. Hay seguridad a nivel de fila definida en todas las tablas.
+--
+--    ATENCION, y esto hay que saberlo: PostgreSQL SALTA las politicas para el
+--    propietario de la tabla salvo que se active FORCE ROW LEVEL SECURITY. Hoy
+--    la aplicacion se conecta con el mismo rol que creo las tablas, asi que
+--    esta segunda barrera NO esta actuando.
+--
+--    El aislamiento real lo dan hoy los "WHERE org_id = %s" de cada consulta,
+--    que si estan puestos. Para que las politicas sirvan de verdad hace falta
+--    un rol propio para la aplicacion, sin privilegios de propietario, y
+--    funciones SECURITY DEFINER para los caminos que cruzan organizaciones a
+--    proposito: autenticacion, alta y webhook de Stripe.
 -- 2. El derecho a usar el producto vive en la base de datos y sólo lo escribe
 --    el webhook de Stripe. Antes vivía en la sesión del navegador y se
 --    desbloqueaba escribiendo el email de otro.
@@ -162,6 +170,40 @@ CREATE INDEX IF NOT EXISTS audit_log_org_idx ON audit_log(org_id, created_at DES
 COMMENT ON TABLE audit_log IS
     'Quién hizo qué y cuándo. Exigible para responder a un derecho de acceso '
     'del RGPD y para investigar un incidente.';
+
+-- ------------------------------------------------ testigos de un solo uso
+
+CREATE TABLE IF NOT EXISTS auth_tokens (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    purpose     TEXT NOT NULL,
+    -- Solo se guarda el hash. Si alguien roba la base, no puede usar los
+    -- testigos pendientes para entrar en las cuentas.
+    token_hash  TEXT NOT NULL UNIQUE,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT auth_tokens_purpose_valid
+        CHECK (purpose IN ('password_reset', 'email_verify'))
+);
+
+CREATE INDEX IF NOT EXISTS auth_tokens_user_idx
+    ON auth_tokens(user_id, purpose) WHERE used_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS auth_tokens_expira_idx ON auth_tokens(expires_at);
+
+COMMENT ON TABLE auth_tokens IS
+    'Testigos de un solo uso. Solo se guarda el hash, nunca el valor enviado.';
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS accepted_terms_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN users.email_verified_at IS
+    'Cuando confirmo su direccion. Necesario para pasar a un plan de pago.';
+COMMENT ON COLUMN users.accepted_terms_at IS
+    'Cuando acepto las condiciones de uso, al darse de alta.';
+
+ALTER TABLE auth_tokens ENABLE ROW LEVEL SECURITY;
 
 -- ------------------------------------------------ seguridad a nivel de fila
 

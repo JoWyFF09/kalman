@@ -64,10 +64,29 @@ uso y caducidad corta.
 
 ### Aislamiento entre clientes
 
-Además del filtro en cada consulta, PostgreSQL aplica **seguridad a nivel de
-fila**. La conexión fija la organización activa con `SET LOCAL app.current_org`
-y las políticas impiden ver o escribir filas de otra organización. Un olvido en
-una cláusula `WHERE` deja de ser una fuga de datos entre clientes.
+Cada consulta filtra explícitamente por organización. **Ese es el aislamiento
+que hay funcionando hoy**, y está puesto en todas.
+
+Hay además políticas de seguridad a nivel de fila definidas en todas las
+tablas, pensadas como segunda barrera. **Hoy no están actuando**, y conviene
+saberlo:
+
+PostgreSQL salta las políticas para el propietario de la tabla salvo que se
+active `FORCE ROW LEVEL SECURITY`. La aplicación se conecta con el mismo rol
+que creó las tablas, así que las atraviesa. Comprobado: fijando una
+organización inexistente con `SET LOCAL app.current_org` se siguen viendo
+filas.
+
+No hay fuga de datos entre clientes, porque el filtro explícito sí está. Lo que
+falta es el cinturón sobre los tirantes.
+
+Para que sirva de verdad hacen falta dos cosas:
+
+1. Un rol propio para la aplicación, sin privilegios de propietario, y
+   `FORCE ROW LEVEL SECURITY` en cada tabla.
+2. Funciones `SECURITY DEFINER` para los caminos que cruzan organizaciones a
+   propósito y no pueden filtrar por una: autenticación, alta de una cuenta
+   nueva y webhook de Stripe.
 
 `SET LOCAL` limita el efecto a la transacción, de modo que una conexión
 devuelta al pool no arrastra la organización del usuario anterior.
@@ -117,3 +136,5 @@ registradas.
 | 2026-09 | `TRUNCATE` global sin confirmación desde la interfaz | Eliminado |
 | 2026-09 | SHA-256 sin clave presentado como anonimización | Corregido |
 | 2026-09 | Precio enviado desde el cliente en cada pago | Corregido |
+| 2026-09 | Recogida del NIF sin `customer_update` rompia el pago | Corregido |
+| 2026-09 | La seguridad a nivel de fila no actuaba sobre el propietario | Documentado, pendiente |
