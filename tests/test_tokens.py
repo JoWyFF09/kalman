@@ -8,10 +8,15 @@ import pytest
 
 from kalman.legal import LEGAL_VERSION, PRIVACY, TERMS, pending_placeholders
 from kalman.notifications.email import (
+    BrevoSender,
+    DisabledSender,
     EmailError,
-    EmailSender,
     EmailSettings,
+    SmtpSender,
     _ocultar,
+    _traducir_fallo_de_red,
+    _traducir_rechazo,
+    build_sender,
     email_verify_body,
     password_reset_body,
 )
@@ -82,17 +87,80 @@ def test_una_fecha_sin_zona_horaria_no_revienta() -> None:
 
 def test_sin_configurar_no_envia_y_lo_dice() -> None:
     """Sin credenciales el producto arranca igual; sólo avisa al usarlo."""
-    sender = EmailSender(EmailSettings("", 465, "", "", ""))
-    assert not sender.available
+    remitente = build_sender(EmailSettings(sender=""))
+    assert isinstance(remitente, DisabledSender)
+    assert not remitente.available
     with pytest.raises(EmailError, match="no está configurado"):
-        sender.send("a@b.es", "Asunto", "Cuerpo")
+        remitente.send("a@b.es", "Asunto", "Cuerpo")
 
 
-def test_se_considera_configurado_con_todo_puesto() -> None:
-    sender = EmailSender(
-        EmailSettings("smtp.gmail.com", 465, "yo@gmail.com", "clave", "yo@gmail.com")
+def test_con_clave_de_api_se_elige_la_via_que_funciona_en_todas_partes() -> None:
+    """La API va por HTTPS, que es el puerto que ningún alojamiento cierra."""
+    remitente = build_sender(EmailSettings(sender="yo@gmail.com", api_key="xkeysib-x"))
+    assert isinstance(remitente, BrevoSender)
+    assert remitente.available
+
+
+def test_solo_con_smtp_se_usa_smtp() -> None:
+    """Sirve en un portátil o en un servidor propio."""
+    remitente = build_sender(
+        EmailSettings(
+            sender="yo@gmail.com", host="smtp.gmail.com",
+            user="yo@gmail.com", password="clave",
+        )
     )
-    assert sender.available
+    assert isinstance(remitente, SmtpSender)
+    assert remitente.available
+
+
+def test_con_las_dos_gana_la_api() -> None:
+    """Si están las dos, se elige la que funciona en un alojamiento gestionado."""
+    remitente = build_sender(
+        EmailSettings(
+            sender="yo@gmail.com", api_key="xkeysib-x",
+            host="smtp.gmail.com", user="yo@gmail.com", password="clave",
+        )
+    )
+    assert isinstance(remitente, BrevoSender)
+
+
+def test_la_api_sin_remitente_no_se_considera_configurada() -> None:
+    """Sin dirección de origen el proveedor rechaza el envío igualmente."""
+    assert not EmailSettings(sender="", api_key="xkeysib-x").api_configured
+
+
+# ------------------------------------------------- traduccion de los fallos
+
+def test_la_red_inalcanzable_apunta_al_puerto_cerrado() -> None:
+    """El fallo que se vio en produccion.
+
+    "Network is unreachable" al conectar con un puerto de correo casi siempre
+    significa que el alojamiento cierra la salida por ahi. Decir solo "no se ha
+    podido enviar" hace perder una tarde revisando contrasenas.
+    """
+    fallo = OSError(101, "Network is unreachable")
+    mensaje = _traducir_fallo_de_red(fallo)
+    assert "puerto de correo" in mensaje
+    assert "API" in mensaje
+
+
+def test_un_tiempo_agotado_se_distingue() -> None:
+    assert "a tiempo" in _traducir_fallo_de_red(OSError("connection timed out"))
+
+
+@pytest.mark.parametrize(
+    "codigo,detalle,esperado",
+    [
+        (401, "", "no es válida"),
+        (403, "", "no es válida"),
+        (400, "sender is not valid", "verificada"),
+        (429, "", "límite diario"),
+    ],
+)
+def test_el_rechazo_del_proveedor_se_traduce(
+    codigo: int, detalle: str, esperado: str
+) -> None:
+    assert esperado in _traducir_rechazo(codigo, detalle)
 
 
 def test_los_registros_no_llevan_el_correo_entero() -> None:

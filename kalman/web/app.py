@@ -47,8 +47,9 @@ from kalman.db.repository import RegistrationError  # noqa: E402
 from kalman.legal import PRIVACY, TERMS  # noqa: E402
 from kalman.notifications.email import (  # noqa: E402
     EmailError,
-    EmailSender,
     EmailSettings,
+    Sender,
+    build_sender,
     email_verify_body,
     password_reset_body,
 )
@@ -73,13 +74,18 @@ def get_repository() -> Repository:
 
 
 @st.cache_resource
-def _remitente() -> EmailSender:
-    """Remitente de correo, construido una vez por proceso."""
+def _remitente() -> Sender:
+    """Remitente de correo, construido una vez por proceso.
+
+    Elige solo entre la API y SMTP segun lo que este configurado.
+    """
     s = get_settings()
-    return EmailSender(
+    return build_sender(
         EmailSettings(
-            host=s.smtp_host, port=s.smtp_port, user=s.smtp_user,
-            password=s.smtp_password, sender=s.email_from,
+            sender=s.email_from,
+            api_key=s.email_api_key,
+            host=s.smtp_host, port=s.smtp_port,
+            user=s.smtp_user, password=s.smtp_password,
         )
     )
 
@@ -302,8 +308,11 @@ def _formulario_recuperar() -> None:
                 str(usuario["org_id"]), "auth.password_reset_requested", {},
                 actor_id=str(usuario["id"]),
             )
-        except EmailError:
-            st.error("No se ha podido enviar el correo. Inténtalo en unos minutos.")
+        except EmailError as exc:
+            # Se enseña el motivo concreto: "no se ha podido enviar" hace
+            # perder una tarde revisando contraseñas cuando el problema es que
+            # el alojamiento cierra el puerto.
+            st.error(str(exc))
             return
 
     st.success(
@@ -405,9 +414,9 @@ def _enviar_verificacion(user: dict, silencioso: bool = False) -> bool:
             ),
         )
         return True
-    except EmailError:
+    except EmailError as exc:
         if not silencioso:
-            st.error("No se ha podido enviar el correo de confirmación.")
+            st.error(str(exc))
         return False
 
 

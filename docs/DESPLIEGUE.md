@@ -139,3 +139,46 @@ Los contadores viven en la memoria del proceso. Con una sola copia de cada
 servicio, que es el caso, el límite es exacto. Si algún día pones dos copias
 detrás de un balanceador, cada una llevará su cuenta y el límite real será el
 doble. Ese día se mueve a Redis y no cambia nada más.
+
+## Correo: por API, nunca por SMTP
+
+Render cierra la salida por los puertos de correo, igual que casi todos los
+alojamientos gestionados, para que no se usen como plataforma de envio masivo.
+El sintoma es este, y despista mucho porque parece un problema de contrasena:
+
+```
+OSError: [Errno 101] Network is unreachable
+```
+
+La conexion ni siquiera sale de la maquina. No hay forma de rodearlo desde el
+codigo, asi que el envio va por la API del proveedor, sobre HTTPS, que es el
+puerto que si esta abierto.
+
+### Configurarlo, 10 minutos
+
+1. Crea una cuenta gratuita en [brevo.com](https://www.brevo.com). El plan
+   gratuito da 300 correos al dia, de sobra para empezar.
+2. En **Senders, Domains & Dedicated IPs**, apartado **Senders**, anade tu
+   direccion de correo y confirmala desde el mensaje que te llegue. Esto es lo
+   que te permite enviar a cualquiera sin tener dominio propio todavia.
+3. En **SMTP & API**, pestana **API Keys**, genera una clave. Empieza por
+   `xkeysib-`.
+4. En Render, en los **dos** servicios, anade:
+
+```
+EMAIL_API_KEY=xkeysib-la-que-te-den
+EMAIL_FROM=la-direccion-que-has-verificado
+```
+
+5. Comprueba que ha quedado bien:
+
+```bash
+python scripts/doctor.py
+```
+
+Cuando tengas dominio propio, verifica el dominio entero en Brevo en lugar de
+una sola direccion. Los correos enviados desde un dominio verificado llegan
+mucho mejor a la bandeja de entrada y no a la de no deseado.
+
+Las variables de SMTP siguen valiendo para tu portatil y para un servidor
+propio. Si estan las dos configuradas, gana la de API.

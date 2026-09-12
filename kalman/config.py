@@ -96,6 +96,7 @@ class Settings:
     support_email: str
     max_upload_mb: int
     session_ttl_hours: int
+    email_api_key: str
     smtp_host: str
     smtp_port: int
     smtp_user: str
@@ -112,13 +113,19 @@ class Settings:
 
     @property
     def email_configured(self) -> bool:
-        """Si falta algo, las pantallas que envían correo lo dicen claramente.
+        """Si falta todo, las pantallas que envían correo lo dicen claramente.
+
+        Vale cualquiera de las dos vías. La de API funciona en un alojamiento
+        gestionado, donde la salida por los puertos de correo suele estar
+        cerrada; la de SMTP sirve en un portátil o en un servidor propio.
 
         El correo es opcional a propósito: sin él el producto arranca igual en
         un portátil recién clonado, sólo que recuperar contraseña y verificar
         la dirección quedan desactivados.
         """
-        return bool(self.smtp_host and self.smtp_user and self.smtp_password)
+        por_api = bool(self.email_api_key and self.email_from)
+        por_smtp = bool(self.smtp_host and self.smtp_user and self.smtp_password)
+        return por_api or por_smtp
 
 
 @functools.lru_cache(maxsize=1)
@@ -149,6 +156,8 @@ def get_settings() -> Settings:
         session_ttl_hours=int(_optional("SESSION_TTL_HOURS", "12")),
         # Correo transaccional. Opcional: sin esto el producto funciona, pero
         # recuperar contraseña y verificar el email quedan desactivados.
+        # La vía de API va primero porque funciona en todas partes.
+        email_api_key=_optional("EMAIL_API_KEY") or _optional("BREVO_API_KEY"),
         smtp_host=_optional("SMTP_HOST"),
         smtp_port=int(_optional("SMTP_PORT", "465")),
         smtp_user=_optional("SMTP_USER"),

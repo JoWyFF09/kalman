@@ -194,8 +194,44 @@ def revisar_stripe() -> None:
         pendientes.append("revisar la clave de Stripe")
 
 
+def revisar_correo() -> None:
+    import os
+
+    titulo("5. Correo transaccional")
+
+    api = os.environ.get("EMAIL_API_KEY", "").strip()
+    remitente = os.environ.get("EMAIL_FROM", "").strip()
+    host = os.environ.get("SMTP_HOST", "").strip()
+    usuario = os.environ.get("SMTP_USER", "").strip()
+    clave = os.environ.get("SMTP_PASSWORD", "").strip()
+
+    if api and remitente:
+        print(f"{OK} Envio por API configurado. Remitente: {remitente}")
+        print("         Es la via correcta en un alojamiento gestionado.")
+        if not api.startswith("xkeysib-"):
+            print(f"{AVISO} La clave no tiene la forma habitual de Brevo.")
+        return
+
+    if api and not remitente:
+        print(f"{FALTA} Hay clave de API pero falta EMAIL_FROM.")
+        print("         Sin direccion de origen el proveedor rechaza el envio.")
+        pendientes.append("rellenar EMAIL_FROM")
+        return
+
+    if host and usuario and clave:
+        print(f"{AVISO} Solo hay SMTP configurado.")
+        print("         Sirve en tu portatil, pero Render y casi todos los")
+        print("         alojamientos cierran la salida por el puerto de correo.")
+        print("         El sintoma es 'Network is unreachable'.")
+        print("         Configura EMAIL_API_KEY y EMAIL_FROM para produccion.")
+        return
+
+    print(f"{AVISO} Sin configurar. Recuperar contrasena y verificar el email")
+    print("         quedan desactivados, pero el resto funciona igual.")
+
+
 def revisar_motor() -> None:
-    titulo("5. Motor de limpieza")
+    titulo("6. Motor de limpieza")
     try:
         from kalman.core.engine import CleaningEngine
         from kalman.sample import generate
@@ -220,6 +256,7 @@ def main() -> int:
         revisar_variables()
         revisar_base_de_datos()
         revisar_stripe()
+        revisar_correo()
     revisar_motor()
 
     titulo("Resumen")
