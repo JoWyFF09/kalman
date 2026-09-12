@@ -118,11 +118,75 @@ plan. Ese cliente no vuelve.
 
 ## Un dominio propio
 
-`kalman-app.onrender.com` funciona, pero para vender conviene algo tuyo. Un
-`.es` cuesta unos 10 euros al año. En Render, dentro del servicio, en Settings
-y luego Custom Domain, te dice qué registro DNS añadir.
+No es solo estetica. Hay un motivo tecnico que decide si tus correos llegan.
 
-Cuando lo tengas, actualiza `APP_URL` y la URL del webhook en Stripe.
+### Por que hace falta de verdad
+
+Enviando desde una direccion de Gmail a traves de un proveedor de correo, la
+comprobacion de origen falla. Gmail publica esto:
+
+```
+gmail.com SPF:   v=spf1 redirect=_spf.google.com
+gmail.com DMARC: p=none; sp=quarantine
+```
+
+Los servidores de tu proveedor no estan en esa lista, asi que el receptor ve un
+correo que dice venir de Gmail pero llega por otro sitio. Con `p=none` no se
+rechaza, pero puntua muy mal, y los correos de recuperacion acaban en la
+carpeta de no deseado con frecuencia. En gestorias con Microsoft 365, mas
+todavia.
+
+Con dominio propio verificado en el proveedor, SPF y DKIM cuadran y los correos
+llegan a la bandeja de entrada.
+
+### Antes de comprar: la marca
+
+Comprueba "Kalman" en la Oficina Espanola de Patentes y Marcas, buscador de
+signos distintivos, clase 42, que es la de servicios informaticos. Si hay una
+marca registrada con ese nombre en esa clase, cambiar ahora cuesta una tarde y
+cambiar con veinte clientes cuesta mucho mas.
+
+### Procedimiento de cambio, en orden
+
+El orden importa. Cambiar el dominio a medias deja los pagos rotos, porque
+Stripe vuelve a una direccion que ya no existe.
+
+1. **Compra el dominio.** Unos 10 a 15 euros al ano.
+2. **Render, servicio kalman-app**, Settings, Custom Domains. Anade
+   `app.tudominio.es` y crea en tu registrador el registro CNAME que te indique.
+3. **Render, servicio kalman-api**, lo mismo con `api.tudominio.es`.
+4. Espera a que Render marque los dos como verificados y emita el certificado.
+   Suele tardar minutos.
+5. **Cambia `APP_URL`** en los dos servicios a `https://app.tudominio.es`. Sin
+   barra al final. Esto es lo que Stripe usa para devolver al cliente tras
+   pagar.
+6. **Stripe**, Desarrolladores, Webhooks. Edita el endpoint y apuntalo a
+   `https://api.tudominio.es/v1/stripe/webhook`. No crees uno nuevo ni borres
+   el viejo hasta que el nuevo funcione.
+7. **Comprueba el webhook:**
+
+```bash
+python scripts/check_webhook.py
+```
+
+8. **Verifica el dominio en el proveedor de correo** y cambia `EMAIL_FROM` a
+   algo como `hola@tudominio.es`. Tendras que anadir unos registros DNS que el
+   proveedor te da, para SPF y DKIM.
+9. **Comprueba que todo sigue en pie:**
+
+```bash
+python scripts/doctor.py
+```
+
+10. **Repite la prueba de pago completa** en modo de pruebas con la tarjeta
+    `4242 4242 4242 4242`. Es la unica forma de saber que los pasos 5 y 6 han
+    quedado bien.
+
+### Que NO hay que tocar
+
+El codigo. Ni una linea. Todo lo que depende del dominio son variables de
+entorno, a proposito: `APP_URL` y `EMAIL_FROM`. Si algun dia hay que editar un
+fichero para cambiar de dominio, es que algo se ha hecho mal.
 
 ## Límite de peticiones
 
