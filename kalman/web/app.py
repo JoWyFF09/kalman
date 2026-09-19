@@ -22,6 +22,7 @@ alguien los vuelva a poner relativos sin darse cuenta.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import sys
 from pathlib import Path
@@ -540,6 +541,32 @@ def pricing_section(user: dict) -> None:
 
 # -------------------------------------------------------------------- limpieza
 
+def _firma(raw: bytes, *opciones: object) -> str:
+    """Identifica una entrada concreta: el fichero y las opciones elegidas.
+
+    Sirve para dos cosas: saber si el resultado guardado sigue valiendo, y no
+    rehacer un Excel de diez mil lineas porque el usuario ha escrito un numero
+    en otra casilla.
+    """
+    return hashlib.sha256(raw + repr(opciones).encode("utf-8")).hexdigest()
+
+
+def _memo(clave: str, firma: str, construir):
+    """Devuelve lo ya construido si la firma no ha cambiado.
+
+    Streamlit vuelve a ejecutar el fichero entero en CADA interaccion, y eso
+    incluye pulsar un boton de descarga. Sin esto, bajarse el CSV reconstruye
+    el Excel y el PDF por el camino, y escribir un decimal en el coste por
+    incidencia los reconstruye otra vez.
+    """
+    guardado = st.session_state.get(clave)
+    if guardado is not None and guardado[0] == firma:
+        return guardado[1]
+    valor = construir()
+    st.session_state[clave] = (firma, valor)
+    return valor
+
+
 def cleaning_section(user: dict, context: dict) -> None:
     """Pantalla principal: subir fichero, ver hallazgos, descargar."""
     plan = context["plan"]
@@ -587,34 +614,54 @@ def cleaning_section(user: dict, context: dict) -> None:
         pricing_section(user)
         return
 
-    if not st.button("Analizar", type="primary"):
+    firma = _firma(raw, apply_norm, find_dupes, pseudonymize)
+
+    if st.button("Analizar", type="primary"):
+        with st.spinner("Analizando..."):
+            engine = (
+                CleaningEngine(
+                    Pseudonymizer(get_settings().pseudonym_key, user["org_id"])
+                )
+                if pseudonymize
+                else CleaningEngine()
+            )
+            result = engine.run(
+                df,
+                CleanOptions(
+                    apply_normalizations=apply_norm,
+                    detect_duplicates=find_dupes,
+                    pseudonymize=pseudonymize,
+                ),
+            )
+            repository.record_job(
+                user["org_id"], user["id"], result.report.as_dict(), uploaded.name
+            )
+        # El fichero original se guarda junto al resultado porque la lista de
+        # trabajo necesita el valor tal y como venia y el nombre del cliente.
+        st.session_state.analisis = {"firma": firma, "resultado": result, "origen": df}
+
+    guardado = st.session_state.get("analisis")
+    if guardado is None:
         return
 
-    with st.spinner("Analizando..."):
-        engine = (
-            CleaningEngine(Pseudonymizer(get_settings().pseudonym_key, user["org_id"]))
-            if pseudonymize
-            else CleaningEngine()
+    # El analisis se guarda, y no se rehace, porque Streamlit reejecuta el
+    # fichero entero en cada interaccion. Antes el resultado solo existia
+    # durante la ejecucion del clic en Analizar, asi que al pulsar cualquier
+    # descarga la pantalla se quedaba vacia. Rehacerlo sin mas tampoco vale:
+    # record_job contaria el fichero dos veces y gastaria cuota del plan.
+    if guardado["firma"] != firma:
+        note(
+            "Has cambiado el fichero o las opciones. Pulsa Analizar para ver "
+            "el resultado nuevo."
         )
-        result = engine.run(
-            df,
-            CleanOptions(
-                apply_normalizations=apply_norm,
-                detect_duplicates=find_dupes,
-                pseudonymize=pseudonymize,
-            ),
-        )
-        repository.record_job(
-            user["org_id"], user["id"], result.report.as_dict(), uploaded.name
-        )
+        return
 
-    st.session_state.last_result = result
-    # El fichero original se conserva para poder construir la lista de trabajo,
-    # que necesita el valor tal y como venía y el nombre del cliente.
-    _render_result(user, result, plan, df)
+    _render_result(user, guardado["resultado"], plan, guardado["origen"], firma)
 
 
-def _render_result(user: dict, result, plan, source: pd.DataFrame) -> None:
+def _render_result(
+    user: dict, result, plan, source: pd.DataFrame, firma: str
+) -> None:
     report = result.report
 
     col1, col2, col3, col4 = st.columns(4)
@@ -635,7 +682,7 @@ def _render_result(user: dict, result, plan, source: pd.DataFrame) -> None:
     )
 
     with tabs[0]:
-        _worklist_tab(source, report, result.duplicates)
+        _worklist_tab(source, report, result.duplicates, firma)
 
     with tabs[1]:
         counts = report.counts_by_rule()
@@ -688,17 +735,21 @@ def _render_result(user: dict, result, plan, source: pd.DataFrame) -> None:
                 "Unir dos clientes que no lo eran destruye información."
             )
 
-    _pdf_section(user, report, plan)
+    _pdf_section(user, report, plan, firma)
 
 
-def _worklist_tab(source: pd.DataFrame, report, duplicates) -> None:
+def _worklist_tab(
+    source: pd.DataFrame, report, duplicates, firma: str
+) -> None:
     """La lista de tareas. Es lo que el cliente abre el lunes por la mañana.
 
     Va la primera de todas las pestañas a propósito. El recuento por regla
     dice cuántos datos están mal; esta lista dice a quién hay que llamar, y es
     la diferencia entre un diagnóstico y una herramienta.
     """
-    worklist = build_worklist(source, report, duplicates)
+    worklist = _memo(
+        "worklist", firma, lambda: build_worklist(source, report, duplicates)
+    )
 
     if worklist.empty:
         st.success("No hay nada que arreglar en este fichero.")
@@ -722,7 +773,7 @@ def _worklist_tab(source: pd.DataFrame, report, duplicates) -> None:
     with col_excel:
         st.download_button(
             "Descargar en Excel",
-            to_excel(worklist),
+            _memo("worklist_excel", firma, lambda: to_excel(worklist)),
             file_name="kalman_lista_de_trabajo.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary",
@@ -738,7 +789,7 @@ def _worklist_tab(source: pd.DataFrame, report, duplicates) -> None:
         )
 
 
-def _pdf_section(user: dict, report, plan) -> None:
+def _pdf_section(user: dict, report, plan, firma: str) -> None:
     """Descarga del informe. Sólo con plan de pago activo."""
     st.divider()
     st.subheader("Informe de auditoría")
@@ -762,29 +813,40 @@ def _pdf_section(user: dict, report, plan) -> None:
     col1, col2 = st.columns([1, 2])
     with col1:
         euros = st.number_input(
-            "Coste por incidencia (€)", min_value=0.0, value=0.0, step=0.5
+            "Coste por incidencia (€)", min_value=0.0, value=0.0, step=0.5,
+            key="coste_incidencia",
         )
     with col2:
-        source = st.text_input(
+        origen = st.text_input(
             "Origen de esa cifra",
             placeholder="Ej.: comisión media por recibo devuelto en 2026",
+            key="origen_coste",
         )
 
     cost = None
     if euros > 0:
-        if not source.strip():
+        if not origen.strip():
             st.warning("Indica de dónde sale esa cifra para poder citarla.")
         else:
-            cost = CostAssumption(euros_per_error=euros, source=source.strip())
+            cost = CostAssumption(euros_per_error=euros, source=origen.strip())
 
-    if st.button("Generar informe"):
-        pdf_bytes = build_report(report.as_dict(), user["org_name"], cost)
-        st.download_button(
-            "Descargar PDF",
-            pdf_bytes,
-            file_name=f"kalman_auditoria_{user['org_slug']}.pdf",
-            mime="application/pdf",
-        )
+    # Sin boton intermedio a proposito. Antes habia uno de "Generar informe"
+    # que revelaba el de descarga, pero al pulsar la descarga Streamlit
+    # reejecutaba el fichero, el boton intermedio devolvia False y la descarga
+    # desaparecia. El PDF se construye una vez y se rehace solo si cambia el
+    # coste declarado.
+    pdf_bytes = _memo(
+        "informe_pdf",
+        f"{firma}:{euros}:{origen.strip()}",
+        lambda: build_report(report.as_dict(), user["org_name"], cost),
+    )
+    st.download_button(
+        "Descargar PDF",
+        pdf_bytes,
+        file_name=f"kalman_auditoria_{user['org_slug']}.pdf",
+        mime="application/pdf",
+        type="primary",
+    )
 
 
 # ------------------------------------------------------------------ historial

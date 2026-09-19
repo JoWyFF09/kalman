@@ -276,12 +276,16 @@ if df is not None:
         "El coste de un dato incorrecto depende de tu operativa y sólo lo "
         "conoces tú."
     )
-    if st.button("Generar informe en PDF"):
-        pdf_bytes = build_report(report.as_dict(), "Informe de demostración")
-        st.download_button(
-            "Descargar PDF", pdf_bytes,
-            file_name="kalman_auditoria_demo.pdf", mime="application/pdf",
-        )
+    # Sin boton intermedio: al pulsar una descarga Streamlit reejecuta el
+    # fichero entero, el boton de arriba devolveria False y la descarga
+    # desapareceria justo despues de usarla.
+    st.download_button(
+        "Descargar el informe en PDF",
+        build_report(report.as_dict(), "Informe de demostración"),
+        file_name="kalman_auditoria_demo.pdf",
+        mime="application/pdf",
+        type="primary",
+    )
 
 st.divider()
 
